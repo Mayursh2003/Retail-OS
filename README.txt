@@ -20,7 +20,6 @@ The system performs real-time person detection on CCTV/store video footage using
 - Python
 - YOLOv8 (Ultralytics)
 - OpenCV
-
 ---
 
 ## Project Structure
