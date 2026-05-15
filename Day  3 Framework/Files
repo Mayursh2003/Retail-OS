@@ -1,0 +1,377 @@
+from ultralytics import YOLO
+import cv2
+import time
+import numpy as np
+
+# Load YOLOv8 Nano model
+model = YOLO("yolov8n.pt")
+
+# Open webcam
+cap = cv2.VideoCapture(0)
+
+# Frame settings
+FRAME_WIDTH = 960
+FRAME_HEIGHT = 720
+DASHBOARD_WIDTH = 420
+
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+
+if not cap.isOpened():
+    print("Error: Cannot access camera")
+    exit()
+
+# Timing
+prev_time = time.time()
+
+# Visitor tracking
+total_visitor_ids = set()
+visitor_data = {}
+
+entry_count = 0
+exit_count = 0
+occupancy_count = 0
+
+ENTRY_LINE_Y = FRAME_HEIGHT // 2
+
+counted_entries = set()
+counted_exits = set()
+
+# Create resizable window
+window_name = "Retail Brain OS - Live Tracking Dashboard"
+
+cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+
+# Optional: start with larger default size
+cv2.resizeWindow(window_name, 1400, 800)
+
+while True:
+    ret, frame = cap.read()
+
+    if not ret:
+        print("Failed to grab frame")
+        break
+
+    frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+
+    # YOLO tracking
+    results = model.track(
+        frame,
+        classes=[0],
+        persist=True,
+        tracker="bytetrack.yaml",
+        verbose=False
+    )
+
+    annotated_frame = frame.copy()
+    active_ids = set()
+
+    current_time = time.time()
+
+    # Draw entry/exit line
+    cv2.line(
+        annotated_frame,
+        (0, ENTRY_LINE_Y),
+        (FRAME_WIDTH, ENTRY_LINE_Y),
+        (0, 0, 255),
+        2
+    )
+
+    cv2.putText(
+        annotated_frame,
+        "Entry / Exit Line",
+        (20, ENTRY_LINE_Y - 10),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 0, 255),
+        2
+    )
+
+    if results and results[0].boxes is not None:
+
+        boxes = results[0].boxes
+
+        for box in boxes:
+
+            if box.id is None:
+                continue
+
+            # Bounding box
+            x1, y1, x2, y2 = map(
+                int,
+                box.xyxy[0].cpu().numpy()
+            )
+
+            confidence = float(box.conf[0])
+            track_id = int(box.id[0])
+
+            active_ids.add(track_id)
+            total_visitor_ids.add(track_id)
+
+            # Center point
+            center_x = int((x1 + x2) / 2)
+            center_y = int((y1 + y2) / 2)
+
+            # New visitor
+            if track_id not in visitor_data:
+
+                visitor_data[track_id] = {
+                    "first_seen": current_time,
+                    "last_seen": current_time,
+                    "frames_visible": 1,
+                    "current_position": (center_x, center_y),
+                    "previous_position": (center_x, center_y),
+                    "path": [(center_x, center_y)],
+                }
+
+            else:
+                visitor_data[track_id]["last_seen"] = current_time
+                visitor_data[track_id]["frames_visible"] += 1
+
+                previous_position = visitor_data[track_id]["current_position"]
+
+                visitor_data[track_id]["previous_position"] = previous_position
+                visitor_data[track_id]["current_position"] = (
+                    center_x,
+                    center_y
+                )
+
+                # Update path
+                visitor_data[track_id]["path"].append(
+                    (center_x, center_y)
+                )
+
+                # Keep trail short
+                if len(visitor_data[track_id]["path"]) > 30:
+                    visitor_data[track_id]["path"].pop(0)
+
+                # Entry / Exit logic
+                prev_y = previous_position[1]
+                curr_y = center_y
+
+                # Entry
+                if (
+                    prev_y < ENTRY_LINE_Y
+                    and curr_y >= ENTRY_LINE_Y
+                    and track_id not in counted_entries
+                ):
+                    entry_count += 1
+                    occupancy_count += 1
+                    counted_entries.add(track_id)
+
+                # Exit
+                if (
+                    prev_y > ENTRY_LINE_Y
+                    and curr_y <= ENTRY_LINE_Y
+                    and track_id not in counted_exits
+                ):
+                    exit_count += 1
+                    occupancy_count = max(
+                        0,
+                        occupancy_count - 1
+                    )
+                    counted_exits.add(track_id)
+
+            # Draw bounding box
+            cv2.rectangle(
+                annotated_frame,
+                (x1, y1),
+                (x2, y2),
+                (0, 255, 0),
+                2
+            )
+
+            # Label
+            label = f"ID: {track_id}"
+
+            cv2.putText(
+                annotated_frame,
+                label,
+                (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 0),
+                2
+            )
+
+            # Center point
+            cv2.circle(
+                annotated_frame,
+                (center_x, center_y),
+                4,
+                (0, 255, 255),
+                -1
+            )
+
+            # Draw movement trail
+            path_points = visitor_data[track_id]["path"]
+
+            for i in range(1, len(path_points)):
+
+                cv2.line(
+                    annotated_frame,
+                    path_points[i - 1],
+                    path_points[i],
+                    (255, 0, 255),
+                    2
+                )
+
+    # FPS calculation
+    fps = 1 / max((current_time - prev_time), 0.0001)
+    prev_time = current_time
+
+    # FPS display
+    cv2.putText(
+        annotated_frame,
+        f"FPS: {int(fps)}",
+        (20, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (255, 255, 0),
+        2
+    )
+
+    # Dashboard
+    dashboard = np.zeros(
+        (FRAME_HEIGHT, DASHBOARD_WIDTH, 3),
+        dtype=np.uint8
+    )
+
+    # Title
+    cv2.putText(
+        dashboard,
+        "Retail Brain OS",
+        (20, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        (0, 255, 255),
+        2
+    )
+
+    cv2.putText(
+        dashboard,
+        "Day 2: Tracking Dashboard",
+        (20, 75),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (200, 200, 200),
+        1
+    )
+
+    # Stats
+    stats_y = 130
+
+    stats = [
+        f"Active Visitors: {len(active_ids)}",
+        f"Total Seen: {len(total_visitor_ids)}",
+        f"Entries: {entry_count}",
+        f"Exits: {exit_count}",
+        f"Occupancy: {occupancy_count}",
+        f"FPS: {int(fps)}"
+    ]
+
+    for stat in stats:
+
+        cv2.putText(
+            dashboard,
+            stat,
+            (20, stats_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 0),
+            2
+        )
+
+        stats_y += 35
+
+    # Divider
+    cv2.line(
+        dashboard,
+        (20, stats_y + 10),
+        (340, stats_y + 10),
+        (100, 100, 100),
+        1
+    )
+
+    cv2.putText(
+        dashboard,
+        "Visitor Details",
+        (20, stats_y + 45),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2
+    )
+
+    y = stats_y + 80
+
+    # Latest visitors
+    for visitor_id in list(visitor_data.keys())[-3:]:
+
+        data = visitor_data[visitor_id]
+
+        visible_seconds = int(
+            current_time - data["first_seen"]
+        )
+
+        last_seen_seconds = int(
+            current_time - data["last_seen"]
+        )
+
+        position = data["current_position"]
+
+        cv2.putText(
+            dashboard,
+            f"ID {visitor_id}",
+            (20, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2
+        )
+
+        cv2.putText(
+            dashboard,
+            f"Visible: {visible_seconds}s",
+            (20, y + 20),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (200, 200, 200),
+            1
+        )
+
+        cv2.putText(
+            dashboard,
+            f"Last Seen: {last_seen_seconds}s ago",
+            (20, y + 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (200, 200, 200),
+            1
+        )
+
+        cv2.putText(
+            dashboard,
+            f"Pos: {position}",
+            (20, y + 60),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (200, 200, 200),
+            1
+        )
+
+        y += 100
+
+    # Combine frames
+    combined_frame = np.hstack(
+        (annotated_frame, dashboard)
+    )
+
+    cv2.imshow(window_name, combined_frame)
+
+    # Quit
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
