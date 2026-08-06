@@ -1,0 +1,10 @@
+pyproject.toml
+./shared/__init__.py
+./shared/bounding_box.py
+./shared/frame_result.py
+./shared/tracked_person.py
+./shared/vision.py
+retailbrain_shared.egg-info/PKG-INFO
+retailbrain_shared.egg-info/SOURCES.txt
+retailbrain_shared.egg-info/dependency_links.txt
+retailbrain_shared.egg-info/top_level.txt
