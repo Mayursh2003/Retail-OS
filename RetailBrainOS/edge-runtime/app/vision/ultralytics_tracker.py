@@ -10,6 +10,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
+
 from ultralytics.trackers.byte_tracker import BYTETracker
 
 from .exceptions import (
@@ -77,14 +79,18 @@ class UltralyticsTracker(Tracker):
         """
         Update tracker state using detector results.
 
+        Ultralytics 8.3.0 BYTETracker performs NumPy operations
+        internally. The detector returns PyTorch-backed Boxes,
+        so this adapter explicitly converts the tracker inputs
+        to NumPy arrays before calling BYTETracker.
+
         Parameters
         ----------
         detections:
             Ultralytics Boxes-like object exposing:
-
                 conf
                 cls
-                xywh (or xywhr)
+                xywh
 
         frame:
             Original OpenCV frame.
@@ -95,34 +101,52 @@ class UltralyticsTracker(Tracker):
             )
 
         if detections is None:
-            return []
+            return np.empty((0, 7), dtype=np.float32)
 
-        required_attributes = ("conf", "cls")
+        required_attributes = ("conf", "cls", "xywh")
 
         for attribute in required_attributes:
             if not hasattr(detections, attribute):
                 raise TrackerUpdateError(
-                    f"Detections object is missing required attribute '{attribute}'."
+                    f"Detections object is missing required "
+                    f"attribute '{attribute}'."
                 )
 
-        if not (
-            hasattr(detections, "xywh")
-            or hasattr(detections, "xywhr")
-        ):
-            raise TrackerUpdateError(
-                "Detections object must expose either 'xywh' or 'xywhr'."
+        try:
+            conf = detections.conf.detach().cpu().numpy()
+            cls = detections.cls.detach().cpu().numpy()
+            xywh = detections.xywh.detach().cpu().numpy()
+
+            conf = np.asarray(conf, dtype=np.float32).reshape(-1)
+            cls = np.asarray(cls, dtype=np.float32).reshape(-1)
+            xywh = np.asarray(xywh, dtype=np.float32).reshape(-1, 4)
+
+            if not (
+                len(conf) == len(cls) == len(xywh)
+            ):
+                raise TrackerUpdateError(
+                    "Detection arrays have inconsistent lengths: "
+                    f"conf={len(conf)}, "
+                    f"cls={len(cls)}, "
+                    f"xywh={len(xywh)}."
+                )
+
+            if len(xywh) == 0:
+                return np.empty((0, 8), dtype=np.float32)
+
+            tracker_input = SimpleNamespace(
+                conf=conf,
+                cls=cls,
+                xywh=xywh,
             )
 
-        try:
             return self._tracker.update(
-                detections,
+                tracker_input,
                 img=frame,
             )
 
-        except Exception as exc:
-            raise TrackerUpdateError(
-                "Ultralytics tracker update failed."
-            ) from exc
+        except TrackerUpdateError:
+            raise
 
     def reset(self) -> None:
         """

@@ -2,15 +2,8 @@
 Retail Brain OS
 Tracker Result Mapper
 
-Converts raw BYTETracker output into Retail Brain OS
+Converts raw tracker output into Retail Brain OS
 shared contracts.
-
-Responsibilities
-----------------
-- Convert tracked NumPy arrays into BoundingBox objects.
-- Construct TrackedPerson models.
-- Assemble FrameResult.
-- Remain independent of Ultralytics.
 """
 
 from __future__ import annotations
@@ -29,7 +22,10 @@ from shared import (
 
 class TrackerMapper:
     """
-    Maps tracker output into Retail Brain OS contracts.
+    Maps tracker output into Retail Brain OS shared contracts.
+
+    The mapper is intentionally independent of the concrete
+    tracker implementation.
     """
 
     @staticmethod
@@ -40,11 +36,16 @@ class TrackerMapper:
         frame_number: int,
         processing_time_ms: float,
     ) -> FrameResult:
+        """
+        Convert tracker output into a FrameResult.
+
+        A frame with zero tracked objects is valid and must still
+        produce a FrameResult with an empty persons list.
+        """
 
         persons: list[TrackedPerson] = []
 
         for row in tracked_objects:
-
             x1 = float(row[0])
             y1 = float(row[1])
             x2 = float(row[2])
@@ -72,7 +73,8 @@ class TrackerMapper:
             )
 
             persons.append(person)
-            return FrameResult(
+
+        return FrameResult(
             frame_id=uuid4(),
             camera_id=camera_id,
             timestamp=timestamp,
