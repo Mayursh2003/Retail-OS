@@ -1,0 +1,871 @@
+Retail Brain OS — Current GUI / Intelligence Status
+
+1. Document Purpose
+
+This document describes the current verified state of the Retail Brain OS GUI and the intelligence features connected to it.
+
+It is intended for the senior/deployment engineer so that the working MVP can be understood without reconstructing the previous milestone history.
+
+This document describes what currently exists.
+
+It does not propose a redesign.
+
+2. Current Milestone Position
+
+Current State
+
+The GUI and live intelligence MVP has reached a verified functional state.
+
+The latest functional milestone completed is:
+
+B-4.9 — Exit Detection
+
+B-4.9 was verified with:
+
+Zone entry                : PASS
+Visible zone exit         : PASS
+Camera-sight disappearance: PASS
+Grace-period protection   : PASS
+CUSTOMER_EXIT events      : PASS
+
+SUCCESS
+
+The GUI also passed compilation after the final changes.
+
+3. High-Level Current Architecture
+
+The current flow is:
+
+                    ┌──────────────────────┐
+                    │   Retail Brain OS    │
+                    │        GUI           │
+                    └──────────┬───────────┘
+                               │
+                               │ controls / display
+                               ▼
+                    ┌──────────────────────┐
+                    │ RetailVisionRuntime  │
+                    └──────────┬───────────┘
+                               │
+             ┌─────────────────┼─────────────────┐
+             │                 │                 │
+             ▼                 ▼                 ▼
+          Camera            Detector          Tracker
+             │                 │                 │
+             └─────────────────┼─────────────────┘
+                               ▼
+                         FrameResult
+                               │
+                               ▼
+                         Zone Engine
+                               │
+                               ▼
+                    Retail Intelligence Engine
+                               │
+                 ┌─────────────┼──────────────┐
+                 ▼             ▼              ▼
+              Dwell        Entry/Exit       Person
+              Engine         Engine         State
+                 │             │              │
+                 └─────────────┼──────────────┘
+                               ▼
+                  RetailIntelligenceResult
+                               │
+                               ▼
+                       Live Dashboard
+
+The GUI is presentation/control logic.
+
+The runtime/intelligence layer owns the actual vision and analytics logic.
+
+This separation was deliberately preserved.
+
+4. Canonical GUI Entry Point
+
+The main GUI module is:
+
+app/gui/retail_os_gui.py
+
+It is responsible for:
+
+creating the Tkinter application
+
+laying out the product UI
+
+handling user controls
+
+starting/stopping the runtime
+
+polling runtime state
+
+rendering the live camera
+
+connecting the dashboard
+
+recording surveillance
+
+capturing faces
+
+saving data
+
+opening saved files
+
+displaying system status
+
+The GUI does not calculate detection, tracking, zone geometry or dwell itself.
+
+5. GUI Responsibility Boundary
+
+The main GUI follows this responsibility model:
+
+GUI
+├── Presentation
+├── User Controls
+├── Camera Display
+├── Zone Setup UI
+├── Zone Management UI
+├── Dashboard
+├── Recording Controls
+├── Face Capture
+├── Data Export
+└── Saved Files Browser
+
+RetailVisionRuntime
+├── Camera
+├── Detector
+├── Tracker
+├── Zone Engine
+└── Intelligence Engine
+
+The original runtime integration explicitly defines this separation: the GUI owns presentation/user controls/dashboard, while RetailVisionRuntime owns camera, detector, tracker, zone engine and intelligence engine. fileciteturn79file3
+
+6. Main GUI Layout
+
+The current GUI is divided into:
+
+┌───────────────────────────────────────────────────────────────┐
+│ RETAIL BRAIN OS                                               │
+│ Retail Intelligence & Surveillance System                     │
+├──────────────┬───────────────────────────────┬────────────────┤
+│              │                               │                │
+│ ZONE         │                               │ LIVE STATUS /  │
+│ MANAGEMENT   │        LIVE CAMERA            │ INTELLIGENCE   │
+│              │                               │                │
+│              │                               │                │
+├──────────────┴───────────────────────────────┴────────────────┤
+│ CONTROL BUTTON BAR                                             │
+├────────────────────────────────────────────────────────────────┤
+│ SYSTEM STATUS | CAMERA | TRACKER | ZONES | VERSION            │
+└────────────────────────────────────────────────────────────────┘
+
+The GUI was later made responsive so that the control buttons use the available horizontal space instead of leaving a large unused area when maximized.
+
+7. Main GUI Scripts
+
+app/gui/retail_os_gui.py
+
+Role
+
+This is the main desktop application controller.
+
+It connects:
+
+Tkinter
++
+RetailVisionRuntime
++
+ZoneSetupWindow
++
+ZoneManagementPanel
++
+LiveDashboard
++
+Live Overlay
+
+It also manages:
+
+runtime lifecycle
+
+camera frame polling
+
+runtime status
+
+recording
+
+face capture
+
+session data
+
+saved files
+
+status footer
+
+The current GUI imports the live overlay, zone setup window, live dashboard, zone management panel and RetailVisionRuntime. fileciteturn79file3
+
+8. app/gui/live_dashboard.py
+
+Role
+
+The Live Dashboard is a presentation component.
+
+It explicitly does not:
+
+run detection
+
+run tracking
+
+calculate zones
+
+calculate dwell
+
+own the camera
+
+Its purpose is to display intelligence produced by the runtime.
+
+The dashboard's documented responsibilities include:
+
+live statistics
+
+current zone-wise dwell
+
+recent entry/exit events fileciteturn78file4
+
+9. Live Dashboard — Statistics
+
+The dashboard maintains historical counters for:
+
+People in Store
+Total Entered
+Total Exited
+Zones
+
+The dashboard also keeps processed event IDs so the same event is not counted repeatedly.
+
+The UI refresh is throttled to:
+
+0.20 seconds
+
+or approximately five human-facing dashboard updates per second.
+
+This is intentional.
+
+The camera/runtime is not limited to the dashboard's visual refresh rate. fileciteturn78file4
+
+10. Active People
+
+The right-side dashboard contains an:
+
+ACTIVE PEOPLE
+
+section.
+
+Each currently visible tracked person can be selected.
+
+The dashboard maintains stable person rows rather than rebuilding the entire section every frame.
+
+This was specifically done to avoid visual glitches during continuous updates.
+
+11. Selected Person
+
+When an active person is selected, the GUI displays:
+
+PERSON DETAILS (SELECTED)
+
+The selected-person card is persistent.
+
+It is updated in place rather than being destroyed and recreated every dashboard refresh.
+
+This prevents the selected-person card from flickering/jumping during live updates.
+
+The displayed information includes the selected person's tracking/session information such as:
+
+ID
+
+first seen
+
+current zone
+
+dwell time
+
+total dwell
+
+12. Dwell Intelligence
+
+Dwell is calculated by the intelligence layer.
+
+The GUI only displays it.
+
+The current system supports:
+
+Zone A dwell
+Zone B dwell
+Total dwell
+First seen
+
+The verified dwell-session test produced:
+
+Zone A dwell (30s) : PASS
+Zone B dwell (45s) : PASS
+Total dwell (75s)  : PASS
+First seen         : PASS
+
+The intelligence engine starts/continues dwell when a person is inside a zone and finalizes the previous zone when the person changes zones or leaves. The current intelligence implementation explicitly captures the previous zone before updating zone state. fileciteturn78file11
+
+13. Entry / Exit Intelligence
+
+The current intelligence layer generates:
+
+CUSTOMER_ENTRY
+CUSTOMER_EXIT
+
+The basic transition model is:
+
+Outside
+   ↓
+Zone
+   = CUSTOMER_ENTRY
+
+Zone
+   ↓
+Outside
+   = CUSTOMER_EXIT
+
+A person moving:
+
+Zone A → Zone B
+
+does not count as a store exit.
+
+14. B-4.9 Exit Detection
+
+B-4.9 fixed an important edge case.
+
+Previously, a person who simply disappeared from the current FrameResult did not necessarily generate a CUSTOMER_EXIT.
+
+The current logic handles:
+
+Person inside zone
+       ↓
+Track disappears
+       ↓
+Missing-track grace period
+       ↓
+Track genuinely lost
+       ↓
+CUSTOMER_EXIT
+
+A grace period is used so a temporary tracker dropout does not immediately become a false exit.
+
+The verified regression test covers:
+
+Zone entry
+Visible zone exit
+Camera-sight disappearance
+Grace-period protection
+CUSTOMER_EXIT generation
+
+All pass.
+
+15. Event Delivery to the Dashboard
+
+The intelligence result now has a dedicated event collection.
+
+Conceptually:
+
+RetailIntelligenceResult
+├── persons
+└── events
+
+persons represents currently visible tracked people.
+
+events carries newly generated intelligence events, including events generated when a track has just disappeared.
+
+This is important because an exited person is no longer an active visible person.
+
+The dashboard consumes those events and increments:
+
+Total Entered
+Total Exited
+
+It also adds the event to Recent Events.
+
+16. Recent Events
+
+The dashboard contains:
+
+RECENT EVENTS
+Last 5 Minutes
+
+The dashboard stores event records containing information such as:
+
+event_id
+track_id
+event_type
+zone_name
+timestamp
+
+Events are deduplicated by event ID.
+
+The recent event window is:
+
+5 minutes
+
+17. Zone Management Panel
+
+Current GUI contains a left-side zone management panel.
+
+The panel provides:
+
+ZONE SETUP
+
+CONFIGURED ZONES
+
+Zone list
+Select zone
+Edit zone
+Delete zone
+Clear all zones
+
+ZONE INFO
+
+Selected Zone
+Points
+Area
+Last Updated
+
+The B-4.4 design explicitly places the zone management panel on the left, the live camera in the center, and the dashboard/status area on the right. fileciteturn78file14
+
+18. Zone Configuration Flow
+
+The current zone flow is:
+
+zones.json
+     |
+     +-----------------------+
+     |                       |
+     v                       v
+Zone Management Panel   RetailVisionRuntime
+     |                       |
+     v                       v
+GUI list              Vision / Dwell / Tracking
+
+Zone changes are intentionally not pushed into a running runtime.
+
+The intended rule is:
+
+Stop Retail OS
+      ↓
+Edit zones
+      ↓
+Save configuration
+      ↓
+Start Retail OS
+      ↓
+Runtime loads updated zones
+
+The B-4.4 integration explicitly states not to modify RetailVisionRuntime from the GUI and to load updated zones on the next runtime start. fileciteturn78file12
+
+19. Zone Setup Window
+
+The existing ZoneSetupWindow is opened through:
+
+SETUP ZONES
+
+The GUI prevents zone setup while Retail OS is running.
+
+The user can:
+
+create zones
+
+define polygon points
+
+name zones
+
+save the zone configuration
+
+After closing zone setup, the zone management panel refreshes.
+
+20. Live Camera
+
+The center area displays the live camera feed.
+
+The GUI uses:
+
+OpenCV
+PIL / ImageTk
+live overlay renderer
+
+The live overlay is presentation only.
+
+The underlying detection/tracking/intelligence remains in the runtime.
+
+The shared camera configuration defines:
+
+Camera index: 0
+Preferred capture resolution: 1280 x 720
+Initial window size: 1280 x 720
+
+The actual OpenCV frame remains the authoritative coordinate system. fileciteturn78file15
+
+21. Live Overlay
+
+The GUI uses:
+
+app/gui/live_overlay.py
+
+for rendering the runtime result onto the displayed frame.
+
+The overlay is not responsible for:
+
+detection
+
+tracking
+
+zone calculations
+
+intelligence calculations
+
+It visualizes the result already produced by the runtime.
+
+22. Runtime Integration
+
+The main GUI starts the runtime in a worker thread.
+
+The runtime startup flow is conceptually:
+
+START RETAIL OS
+      ↓
+runtime_starting = True
+      ↓
+background worker
+      ↓
+RetailVisionRuntime()
+      ↓
+runtime.start()
+      ↓
+GUI receives runtime state
+
+This prevents runtime startup from blocking the Tkinter event loop.
+
+The current GUI then polls runtime state using Tkinter's scheduled callbacks.
+
+23. Runtime State Display
+
+The GUI displays runtime state such as:
+
+RUNNING / STOPPED
+FPS
+Camera status
+Tracker status
+Zones loaded
+
+The bottom product status strip additionally reports:
+
+System Status
+Camera
+Tracker
+Zones
+Retail Brain OS version
+
+These values are derived from runtime/application state rather than being intended as decorative text.
+
+24. Recording
+
+The GUI includes:
+
+RECORD SURVEILLANCE
+STOP RECORDING
+
+Recording uses OpenCV video writing.
+
+Generated surveillance recordings are stored under:
+
+recordings/
+
+The recording controls are enabled/disabled according to runtime state.
+
+25. Face Capture
+
+The GUI includes:
+
+CAPTURE FACE
+
+The intended workflow is to select an active person and capture the corresponding face/image from the live runtime context.
+
+Captured images are stored under:
+
+face_captures/
+
+No separate face-management button was added.
+
+26. Save Data
+
+The GUI includes:
+
+SAVE DATA
+
+The current behavior saves session data.
+
+Additionally, when an active person is selected, the selected person's data is saved as a separate person-data snapshot.
+
+The resulting directories are:
+
+data_exports/
+person_data/
+
+The selected-person data is therefore preserved instead of being only transient dashboard information.
+
+27. Open Saved Files
+
+The button is:
+
+OPEN SAVED FILES
+
+It is intentionally a unified browser for saved outputs.
+
+It can expose:
+
+SURVEILLANCE
+FACE CAPTURE
+SESSION DATA
+PERSON DATA
+
+The design deliberately avoids adding another button just for saved person data.
+
+28. Responsive Control Bar
+
+The bottom control bar was changed from a fixed-width layout to a responsive grid.
+
+The buttons are intended to:
+
+remain usable at normal window size
+
+expand across available space when maximized
+
+avoid disappearing below the visible GUI
+
+preserve a dedicated Close button
+
+The current controls are:
+
+SETUP ZONES
+START RETAIL OS
+STOP RETAIL OS
+RECORD SURVEILLANCE
+STOP RECORDING
+CAPTURE FACE
+SAVE DATA
+OPEN SAVED FILES
+CLOSE
+
+29. Visual Theme
+
+The current GUI has a dark product-oriented visual theme.
+
+The visual direction uses:
+
+dark navy backgrounds
+lighter dark cards
+cyan/teal section accents
+white primary text
+muted secondary text
+colored action buttons
+
+Current action colors are conceptually:
+
+Setup        → teal
+Start        → green
+Stop         → red
+Record       → blue
+Stop Record  → slate
+Capture Face → purple
+Save Data    → orange
+Saved Files  → cyan
+Close        → dark red
+
+This is presentation only and does not change runtime logic.
+
+30. Product Status Footer
+
+A compact status strip was added below the control bar.
+
+It displays:
+
+System Status
+Camera
+Tracker
+Zones
+Retail Brain OS v1.0.0
+
+The current GUI updates these values while polling runtime state.
+
+Typical operational display:
+
+● System Status: All Systems Operational
+Camera: Connected
+Tracker: Active
+Zones: Loaded (2)
+Retail Brain OS v1.0.0
+
+31. Current Data Model at GUI Boundary
+
+The GUI consumes the vision/intelligence result rather than calculating it.
+
+The intelligence result contains:
+
+camera_id
+timestamp
+frame_number
+persons
+events
+
+A person intelligence record contains information including:
+
+track_id
+zone_id
+dwell_time
+entry_exit_event
+first_seen_at
+total_dwell
+
+The GUI uses these values for display, counters, selection and persistence.
+
+32. Important Stability Decisions
+
+Several GUI stability issues were deliberately fixed.
+
+Dashboard throttling
+
+The camera can update continuously while the human-facing dashboard updates at a lower rate.
+
+Stable active-person rows
+
+Rows are reused instead of recreated unnecessarily.
+
+Persistent selected-person card
+
+The selected-person detail card is updated in place.
+
+Event processing
+
+Event ingestion is separated from the visual dashboard refresh throttle so frame-level entry/exit events are not silently lost.
+
+Tracker-loss grace period
+
+A short grace period prevents temporary tracking loss from becoming an immediate exit.
+
+33. What the GUI Does NOT Do
+
+Do not move these responsibilities into the GUI:
+
+YOLO inference
+ByteTrack lifecycle
+person detection
+person tracking
+zone geometry
+dwell calculation
+entry/exit calculation
+camera ownership
+
+The GUI should remain a presentation/control layer.
+
+This separation is part of the existing architecture and should be preserved.
+
+34. Verified Current Functional Set
+
+The current GUI/MVP has been manually verified for:
+
+✓ GUI startup
+✓ Zone setup
+✓ Zone creation
+✓ Zone management
+✓ Runtime startup
+✓ Live camera
+✓ Person detection
+✓ Tracking
+✓ Multiple people
+✓ Multiple zones
+✓ Zone entry
+✓ Zone exit
+✓ Camera-sight exit
+✓ Total entered
+✓ Total exited
+✓ Dwell time
+✓ Active People
+✓ Selected Person
+✓ Selected Person data saving
+✓ Surveillance recording
+✓ Face capture
+✓ Saved data
+✓ Saved files browser
+✓ Responsive control bar
+✓ Product visual theme
+✓ Product status footer
+
+The exit feature additionally has an automated regression test.
+
+35. Current Automated Verification
+
+Run:
+
+python -m compileall app\gui
+python -m compileall app\intelligence
+
+Then:
+
+python -m app.intelligence.test_intelligence_engine
+python -m app.intelligence.test_dwell_session
+python -m app.intelligence.test_intelligence_exit_B49
+
+The latest verified B-4.9 output was:
+
+Zone entry                : PASS
+Visible zone exit         : PASS
+Camera-sight disappearance: PASS
+Grace-period protection   : PASS
+CUSTOMER_EXIT events      : PASS
+
+SUCCESS
+
+36. Current Boundary / Next Engineering Layer
+
+The current work should be treated as a stable MVP baseline.
+
+The next layer is production deployment/productization rather than another GUI rewrite.
+
+Potential next responsibilities include:
+
+Production packaging
+Cloud deployment
+Browser/web delivery
+Authentication
+HTTPS
+CI/CD
+Backend integration
+Database deployment
+Redis deployment
+Model delivery
+Edge Agent packaging
+Store provisioning
+Remote monitoring
+
+These should be implemented without breaking the current GUI/intelligence contracts.
+
+37. Final Handoff Rule
+
+Treat the current canonical files as the source of truth.
+
+Do not deploy experimental files such as:
+
+*_backup.py
+*_B45*.py
+*_B46*.py
+*_B47*.py
+*_B48*.py
+temporary generated variants
+
+unless a specific file has deliberately been promoted to the canonical production filename.
+
+The repository should contain one authoritative implementation of each module.
+
+The current stable behavior should be preserved before beginning production deployment work.
