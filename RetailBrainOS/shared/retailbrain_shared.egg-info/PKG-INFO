@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: retailbrain-shared
+Version: 1.0.0
+Summary: Retail Brain OS Shared Contracts
+Requires-Python: >=3.11

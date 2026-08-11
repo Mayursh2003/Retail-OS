@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
+from uuid import UUID
 
 
 @dataclass(slots=True)
@@ -15,7 +16,7 @@ class RTSPStream:
     is performed in this milestone.
     """
 
-    camera_id: str
+    camera_id: UUID
     rtsp_url: str
 
     connected: bool = False
@@ -24,22 +25,17 @@ class RTSPStream:
 
     def connect(self) -> None:
         """
-        Mark the stream as connected.
-
-        Actual RTSP connection logic will be implemented
-        in a future milestone.
+        Mark the stream as connected after validating the RTSP URL.
         """
-        self.connected = True
-        self.reconnect_attempts = 0
-        self.last_connected_at = datetime.now(timezone.utc)
-
         if not (
             self.rtsp_url.startswith("rtsp://")
             or self.rtsp_url.startswith("rtsps://")
         ):
-            raise ValueError(
-                "Invalid RTSP URL."
-            )
+            raise ValueError("Invalid RTSP URL.")
+
+        self.connected = True
+        self.reconnect_attempts = 0
+        self.last_connected_at = datetime.now(timezone.utc)
 
     def disconnect(self) -> None:
         """

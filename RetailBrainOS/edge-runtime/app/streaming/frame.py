@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
 import numpy as np
 
@@ -14,6 +15,6 @@ class Frame:
     validation, or transformation.
     """
 
-    camera_id: str
+    camera_id: UUID
     image: np.ndarray
     timestamp: datetime
