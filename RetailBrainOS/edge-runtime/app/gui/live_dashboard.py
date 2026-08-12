@@ -382,7 +382,7 @@ class LiveDashboard:
             bg="#f4f6f8",
             bd=1,
             relief="solid",
-            height=128,
+            height=230,
         )
 
         self.person_details_frame.pack(
@@ -434,6 +434,8 @@ class LiveDashboard:
 
         for title in (
             "First Seen",
+            "Store Entry",
+            "Store Exit",
             "Current Zone",
             "Dwell Time",
             "Total Dwell",
@@ -478,6 +480,21 @@ class LiveDashboard:
 
         self.person_details_empty = None
 
+        # -------------------------------------------------
+        # Selected ID zone-wise cumulative dwell.
+        # -------------------------------------------------
+        self.person_zone_dwell_frame = tk.Frame(
+            self.person_details_frame,
+            bg="#f4f6f8",
+        )
+
+        self.person_zone_dwell_frame.pack(
+            fill="x",
+            padx=0,
+            pady=(3, 5),
+        )
+
+        self._clear_zone_dwell_details()
 
         # =================================================
         # RECENT EVENTS
@@ -607,41 +624,57 @@ class LiveDashboard:
         self,
         intelligence_result: Any,
         zones: Any,
+        session_people: dict[int, dict[str, Any]] | None = None,
     ) -> None:
 
         if intelligence_result is None:
             return
+
+        self._session_people = (
+            session_people
+            if session_people is not None
+            else {}
+        )
+
+        # -------------------------------------------------
+        # Throttle GUI dashboard updates.
+        #
+        # Camera remains completely independent.
+        # -------------------------------------------------
+
+        now = time.monotonic()
+
+        if (
+            now - self.last_update_time
+            < self.DASHBOARD_REFRESH_INTERVAL
+        ):
+            return
+
+        self.last_update_time = now
 
         persons = (
             intelligence_result.persons
         )
 
         # -------------------------------------------------
-        # EVENT INGESTION
-        #
-        # This part intentionally runs on every dashboard
-        # poll. Events are frame-level signals and must not be
-        # lost behind the human-facing 0.20s UI refresh
-        # throttle.
+        # Current people count
         # -------------------------------------------------
 
-        events = getattr(
-            intelligence_result,
-            "events",
-            None,
+        people_in_store = len(
+            persons
         )
 
-        if events is None:
+        # -------------------------------------------------
+        # Process entry/exit events
+        # -------------------------------------------------
 
-            # Backward compatibility with the previous result
-            # object. New code uses result.events.
-            events = [
+        new_event_added = False
+
+        for person in persons:
+
+            event = (
                 person.entry_exit_event
-                for person in persons
-                if person.entry_exit_event is not None
-            ]
-
-        for event in events:
+            )
 
             if event is None:
                 continue
@@ -683,6 +716,8 @@ class LiveDashboard:
                 event_record,
             )
 
+            new_event_added = True
+
             if event_type == (
                 "customer_entry"
             ):
@@ -696,38 +731,17 @@ class LiveDashboard:
                 self.total_exited += 1
 
         # -------------------------------------------------
-        # Remove expired events on every poll as well.
+        # Remove expired events
         # -------------------------------------------------
+
+        reference_time = (
+            intelligence_result.timestamp
+        )
 
         events_changed = (
             self._remove_old_events(
-                intelligence_result.timestamp
+                reference_time
             )
-        )
-
-        # -------------------------------------------------
-        # UI REFRESH THROTTLE
-        #
-        # Only visual widget updates are throttled.
-        # Event ingestion above is never throttled.
-        # -------------------------------------------------
-
-        now = time.monotonic()
-
-        if (
-            now - self.last_update_time
-            < self.DASHBOARD_REFRESH_INTERVAL
-        ):
-            return
-
-        self.last_update_time = now
-
-        # -------------------------------------------------
-        # Current people count
-        # -------------------------------------------------
-
-        people_in_store = len(
-            persons
         )
 
         # -------------------------------------------------
@@ -783,16 +797,14 @@ class LiveDashboard:
         self._last_zones = zones
 
         # -------------------------------------------------
-        # Render recent events.
-        #
-        # The list has its own signature optimization, so
-        # calling this on each UI refresh is inexpensive.
+        # Update events only when necessary
         # -------------------------------------------------
 
         if (
-            events_changed
-            or events
+            new_event_added
+            or events_changed
         ):
+
             self._update_events_list()
 
     # =====================================================
@@ -1521,6 +1533,7 @@ class LiveDashboard:
     def _update_selected_person_details(
         self,
         zones: Any,
+        session_people: dict[int, dict[str, Any]] | None = None,
     ) -> None:
 
         self._last_zones = zones
@@ -1528,7 +1541,6 @@ class LiveDashboard:
         key = self.selected_person_key
 
         if key is None or key not in self.current_people:
-
             self.person_details_id_label.configure(
                 text="ID: --"
             )
@@ -1538,13 +1550,10 @@ class LiveDashboard:
                 fg="#777777",
             )
 
-            for label in (
-                self.person_detail_value_labels.values()
-            ):
-                label.configure(
-                    text="--"
-                )
+            for label in self.person_detail_value_labels.values():
+                label.configure(text="--")
 
+            self._clear_zone_dwell_details()
             return
 
         person = self.current_people[key]
@@ -1558,30 +1567,130 @@ class LiveDashboard:
             text=f"ID: {person.track_id}"
         )
 
-        if person.zone_id is not None:
+        self.person_details_status_label.configure(
+            text=(
+                "● Inside Store"
+                if person.zone_id is not None
+                else "● Outside"
+            ),
+            fg=(
+                "#16a34a"
+                if person.zone_id is not None
+                else "#777777"
+            ),
+        )
 
-            self.person_details_status_label.configure(
-                text="● Inside Store",
-                fg="#16a34a",
+        record = None
+        if session_people is not None:
+            record = session_people.get(
+                int(person.track_id)
             )
 
-        else:
+        first_seen = getattr(
+            person,
+            "first_seen_at",
+            None,
+        )
 
-            self.person_details_status_label.configure(
-                text="● Outside",
-                fg="#777777",
+        store_entry = None
+        store_exit = None
+        current_dwell = getattr(
+            person,
+            "dwell_time",
+            None,
+        )
+        total_dwell = getattr(
+            person,
+            "total_dwell",
+            None,
+        )
+        zone_totals = {}
+
+        if record is not None:
+            first_seen = record.get(
+                "first_seen"
+            ) or first_seen
+
+            store_entry = record.get(
+                "store_entry_time"
+            )
+
+            store_exit = record.get(
+                "store_exit_time"
+            )
+
+            current_seconds = float(
+                record.get(
+                    "current_dwell_seconds",
+                    0.0,
+                )
+            )
+
+            if current_seconds > 0:
+                current_dwell = timedelta(
+                    seconds=current_seconds
+                )
+
+            zone_totals = {
+                str(name): float(value)
+                for name, value in (
+                    record.get(
+                        "zone_dwell_seconds",
+                        {},
+                    ) or {}
+                ).items()
+            }
+
+            active_zone_name = record.get(
+                "active_zone_name"
+            )
+
+            if active_zone_name:
+                active_seconds = float(
+                    record.get(
+                        "current_dwell_seconds",
+                        0.0,
+                    )
+                )
+
+                zone_totals[active_zone_name] = (
+                    zone_totals.get(
+                        active_zone_name,
+                        0.0,
+                    )
+                    + active_seconds
+                )
+
+            total_dwell = timedelta(
+                seconds=sum(
+                    zone_totals.values()
+                )
             )
 
         self.person_detail_value_labels[
             "First Seen"
         ].configure(
             text=self._format_person_timestamp(
-                getattr(
-                    person,
-                    "first_seen_at",
-                    None,
-                )
+                first_seen
             )
+        )
+
+        self.person_detail_value_labels[
+            "Store Entry"
+        ].configure(
+            text=self._format_person_timestamp(
+                store_entry
+            )
+        )
+
+        self.person_detail_value_labels[
+            "Store Exit"
+        ].configure(
+            text=self._format_person_timestamp(
+                store_exit
+            )
+            if store_exit is not None
+            else "--:--:--"
         )
 
         self.person_detail_value_labels[
@@ -1594,7 +1703,7 @@ class LiveDashboard:
             "Dwell Time"
         ].configure(
             text=self._format_duration(
-                person.dwell_time
+                current_dwell
             )
         )
 
@@ -1602,13 +1711,85 @@ class LiveDashboard:
             "Total Dwell"
         ].configure(
             text=self._format_duration(
-                getattr(
-                    person,
-                    "total_dwell",
-                    None,
-                )
+                total_dwell
             )
         )
+
+        self._update_zone_dwell_details(
+            zone_totals
+        )
+
+    def _clear_zone_dwell_details(self) -> None:
+        for widget in self.person_zone_dwell_frame.winfo_children():
+            widget.destroy()
+
+        tk.Label(
+            self.person_zone_dwell_frame,
+            text="No zone dwell data",
+            font=("Segoe UI", 7),
+            fg="#888888",
+            bg="#f4f6f8",
+        ).pack(
+            anchor="w",
+            padx=8,
+            pady=4,
+        )
+
+    def _update_zone_dwell_details(
+        self,
+        zone_totals: dict[str, float],
+    ) -> None:
+        for widget in self.person_zone_dwell_frame.winfo_children():
+            widget.destroy()
+
+        if not zone_totals:
+            self._clear_zone_dwell_details()
+            return
+
+        for zone_name, seconds in zone_totals.items():
+            row = tk.Frame(
+                self.person_zone_dwell_frame,
+                bg="#f4f6f8",
+            )
+
+            row.pack(
+                fill="x",
+                padx=8,
+                pady=1,
+            )
+
+            tk.Label(
+                row,
+                text=str(zone_name),
+                font=("Segoe UI", 7),
+                fg="#666666",
+                bg="#f4f6f8",
+            ).pack(
+                side="left"
+            )
+
+            tk.Label(
+                row,
+                text=self._format_seconds(
+                    seconds
+                ),
+                font=("Segoe UI", 7, "bold"),
+                fg="#18202a",
+                bg="#f4f6f8",
+            ).pack(
+                side="right"
+            )
+
+    @staticmethod
+    def _format_seconds(seconds: float) -> str:
+        total = max(0, int(round(float(seconds))))
+        hours, remainder = divmod(total, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        return f"{minutes:02d}:{seconds:02d}"
 
     @staticmethod
     def _format_person_timestamp(
