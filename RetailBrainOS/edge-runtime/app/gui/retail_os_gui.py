@@ -13,6 +13,7 @@ import csv
 import json
 import os
 import threading
+from zoneinfo import ZoneInfo
 import tkinter as tk
 from tkinter import messagebox
 from datetime import datetime
@@ -307,6 +308,15 @@ class RetailBrainOSApp:
             weight=1,
         )
 
+        # Compact camera information strip below the live frame.
+        # This mirrors the product reference: resolution and
+        # current camera time are shown immediately below the
+        # video area and above the control bar.
+        camera_panel.grid_rowconfigure(
+            2,
+            weight=0,
+        )
+
         camera_panel.grid_columnconfigure(
             0,
             weight=1,
@@ -346,7 +356,74 @@ class RetailBrainOSApp:
             column=0,
             sticky="nsew",
             padx=8,
+            pady=(0, 4),
+        )
+
+        # -------------------------------------------------
+        # Camera Information Strip
+        #
+        # Compact readings shown directly below the camera,
+        # matching the product reference:
+        #
+        # Resolution: 640x480  |  Time: 11 Aug 2026 16:15:42
+        #
+        # The values are updated from the live runtime frame.
+        # -------------------------------------------------
+
+        self.camera_info_bar = tk.Frame(
+            camera_panel,
+            bg="#03070d",
+            height=28,
+        )
+
+        self.camera_info_bar.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            padx=8,
             pady=(0, 8),
+        )
+
+        self.camera_info_bar.grid_propagate(False)
+
+        self.camera_resolution_label = tk.Label(
+            self.camera_info_bar,
+            text="Resolution: --",
+            font=("Segoe UI", 8),
+            bg="#03070d",
+            fg="#aeb9c8",
+            anchor="w",
+        )
+
+        self.camera_resolution_label.pack(
+            side="left",
+            padx=(8, 0),
+        )
+
+        self.camera_info_separator = tk.Label(
+            self.camera_info_bar,
+            text="|",
+            font=("Segoe UI", 8),
+            bg="#03070d",
+            fg="#526176",
+        )
+
+        self.camera_info_separator.pack(
+            side="left",
+            padx=10,
+        )
+
+        self.camera_time_label = tk.Label(
+            self.camera_info_bar,
+            text="Time: --",
+            font=("Segoe UI", 8),
+            bg="#03070d",
+            fg="#aeb9c8",
+            anchor="w",
+        )
+
+        self.camera_time_label.pack(
+            side="left",
         )
 
         # =================================================
@@ -1711,6 +1788,21 @@ class RetailBrainOSApp:
 
         if state.frame is not None:
 
+            frame_height, frame_width = state.frame.shape[:2]
+
+            self.camera_resolution_label.config(
+                text=f"Resolution: {frame_width}x{frame_height}"
+            )
+
+            self.camera_time_label.config(
+                text=(
+                    "Time: "
+                    + datetime.now().strftime(
+                        "%d %b %Y %H:%M:%S"
+                    )
+                )
+            )
+
             rendered_frame = state.frame
 
             if (
@@ -1745,15 +1837,17 @@ class RetailBrainOSApp:
 
         if state.intelligence_result is not None:
 
+            self._update_session_people(
+                state.intelligence_result,
+                state.zones,
+            )
+
             self.live_dashboard.update(
                 intelligence_result=(
                     state.intelligence_result
                 ),
                 zones=state.zones,
-            )
-
-            self._update_session_people(
-                state.intelligence_result
+                session_people=self.session_people,
             )
 
             self.capture_face_button.config(
@@ -1928,13 +2022,355 @@ class RetailBrainOSApp:
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _session_zone_name(zone_id, zones) -> str:
+        """Return the configured human-readable zone name."""
+        if zone_id is None:
+            return ""
+
+        for zone in zones or ():
+            if getattr(zone, "zone_id", None) == zone_id:
+                return str(getattr(zone, "name", zone_id))
+
+        return str(zone_id)
+
+    @staticmethod
+    def _session_timestamp(value):
+        """
+        Convert a datetime-like value to a JSON-safe local-time ISO string.
+
+        Vision/intelligence timestamps remain UTC internally. Saved GUI
+        session data is presented in the store's local timezone (India).
+        """
+        if value is None:
+            return None
+
+        if isinstance(value, datetime):
+            if value.tzinfo is not None:
+                value = value.astimezone(
+                    ZoneInfo("Asia/Kolkata")
+                )
+            return value.isoformat()
+
+        return str(value)
+
+    @staticmethod
+    def _safe_float(value, default=0.0):
+        """Convert a value to float without allowing malformed session data to crash the GUI."""
+        if isinstance(value, bool):
+            return default
+
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _session_zone_dwell_totals(
+        cls,
+        record: dict[str, object],
+    ) -> dict[str, float]:
+        """
+        Return safe cumulative dwell totals per zone.
+
+        The GUI session record normally stores:
+
+            {"Zone A": 12.5, "Zone B": 8.2}
+
+        If an older/malformed in-memory record contains a non-numeric
+        value (for example ``"Zone A"`` as a value), rebuild the totals
+        from ``zone_visits`` instead of allowing the Tkinter polling
+        callback to crash.
+
+        This is intentionally defensive: the vision/runtime pipeline is
+        not modified.
+        """
+        raw_totals = record.get(
+            "zone_dwell_seconds",
+            {},
+        )
+
+        numeric_totals: dict[str, float] = {}
+        malformed = False
+
+        if isinstance(raw_totals, dict):
+            for name, value in raw_totals.items():
+                try:
+                    numeric_totals[str(name)] = float(value)
+                except (TypeError, ValueError):
+                    malformed = True
+        else:
+            malformed = True
+
+        if not malformed:
+            return numeric_totals
+
+        # If the cumulative map is malformed, reconstruct it from the
+        # individual finalized zone visits, which contain their own
+        # numeric dwell_seconds values.
+        rebuilt: dict[str, float] = {}
+
+        visits = record.get(
+            "zone_visits",
+            [],
+        )
+
+        if isinstance(visits, list):
+            for visit in visits:
+                if not isinstance(visit, dict):
+                    continue
+
+                zone_name = visit.get(
+                    "zone_name"
+                )
+
+                if not zone_name:
+                    continue
+
+                try:
+                    duration = float(
+                        visit.get(
+                            "dwell_seconds",
+                            0.0,
+                        )
+                    )
+                except (TypeError, ValueError):
+                    continue
+
+                zone_key = str(zone_name)
+                rebuilt[zone_key] = (
+                    rebuilt.get(zone_key, 0.0)
+                    + duration
+                )
+
+        # If there are no usable visits, retain whatever numeric values
+        # were available rather than losing valid history.
+        return rebuilt or numeric_totals
+
+    def _finalize_active_zone(
+        self,
+        record: dict[str, object],
+        exit_time,
+    ) -> None:
+        """Finalize the active zone visit and accumulate its dwell."""
+        active_zone_id = record.get("active_zone_id")
+        active_zone_name = record.get("active_zone_name")
+        entered_at = record.get("active_zone_entered_at")
+
+        if (
+            active_zone_id in (None, "")
+            or entered_at is None
+            or exit_time is None
+        ):
+            record["active_zone_id"] = ""
+            record["active_zone_name"] = ""
+            record["active_zone_entered_at"] = None
+            record["current_dwell_seconds"] = 0.0
+            return
+
+        try:
+            duration_seconds = max(
+                0.0,
+                (exit_time - entered_at).total_seconds(),
+            )
+        except (AttributeError, TypeError, ValueError):
+            duration_seconds = 0.0
+
+        zone_name = (
+            str(active_zone_name)
+            if active_zone_name
+            else str(active_zone_id)
+        )
+
+        zone_dwell = record.setdefault("zone_dwell_seconds", {})
+
+        if not isinstance(zone_dwell, dict):
+            zone_dwell = {}
+            record["zone_dwell_seconds"] = zone_dwell
+
+        previous_total = self._safe_float(
+            zone_dwell.get(zone_name, 0.0)
+        )
+
+        zone_dwell[zone_name] = (
+            previous_total + duration_seconds
+        )
+
+        zone_visits = record.setdefault("zone_visits", [])
+        zone_visits.append(
+            {
+                "zone_name": zone_name,
+                "entered_at": self._session_timestamp(entered_at),
+                "exited_at": self._session_timestamp(exit_time),
+                "dwell_seconds": duration_seconds,
+            }
+        )
+
+        record["active_zone_id"] = ""
+        record["active_zone_name"] = ""
+        record["active_zone_entered_at"] = None
+        record["current_dwell_seconds"] = 0.0
+
     def _update_session_people(
         self,
         intelligence_result,
+        zones,
     ) -> None:
+        """
+        Maintain one coherent customer session per track ID.
 
-        for person in intelligence_result.persons:
+        Rules:
+        - CUSTOMER_ENTRY / CUSTOMER_EXIT events are authoritative for
+          store entry and exit timestamps.
+        - A zone visit starts at the actual zone-transition frame unless
+          the CUSTOMER_ENTRY event itself opened that zone visit.
+        - A CUSTOMER_EXIT permanently closes the current session.
+        - Frames arriving after a CUSTOMER_EXIT cannot reopen the closed
+          session.
+        - If the same track ID is legitimately reused after a new
+          CUSTOMER_ENTRY, a fresh session record is started.
+        """
+        timestamp = getattr(
+            intelligence_result,
+            "timestamp",
+            None,
+        )
 
+        def new_record(track_id: int) -> dict[str, object]:
+            return {
+                "track_id": track_id,
+                "first_seen": None,
+                "last_seen": timestamp,
+                "store_entry_time": None,
+                "store_exit_time": None,
+                "last_event_time": None,
+                "zone_id": "",
+                "current_zone": "",
+                "current_dwell_seconds": 0.0,
+                "total_dwell_seconds": 0.0,
+                "zone_dwell_seconds": {},
+                "zone_visits": [],
+                "active_zone_id": "",
+                "active_zone_name": "",
+                "active_zone_entered_at": None,
+                "session_closed": False,
+            }
+
+        def get_record(track_id: int) -> dict[str, object]:
+            record = self.session_people.get(track_id)
+
+            if record is None:
+                record = new_record(track_id)
+                self.session_people[track_id] = record
+
+            return record
+
+        # -------------------------------------------------
+        # 1. Process authoritative store events first.
+        # -------------------------------------------------
+        for event in getattr(
+            intelligence_result,
+            "events",
+            (),
+        ) or ():
+            track_id = getattr(
+                event,
+                "track_id",
+                None,
+            )
+
+            if track_id is None:
+                continue
+
+            track_id = int(track_id)
+            event_type = getattr(
+                getattr(event, "event_type", None),
+                "value",
+                str(getattr(event, "event_type", "")),
+            )
+
+            event_timestamp = getattr(
+                event,
+                "timestamp",
+                timestamp,
+            )
+
+            event_zone_id = getattr(
+                event,
+                "zone_id",
+                None,
+            )
+
+            event_zone_name = self._session_zone_name(
+                event_zone_id,
+                zones,
+            )
+
+            record = get_record(track_id)
+
+            # A new CUSTOMER_ENTRY after a previously closed session
+            # starts a genuinely new session for that track ID.
+            if (
+                event_type == "customer_entry"
+                and record.get("session_closed")
+            ):
+                record = new_record(track_id)
+                self.session_people[track_id] = record
+
+            if event_type == "customer_entry":
+                if record.get("store_entry_time") is None:
+                    record["store_entry_time"] = event_timestamp
+
+                record["session_closed"] = False
+
+                # If the entry event already carries the person's zone,
+                # this is the authoritative start of that zone visit.
+                if (
+                    record.get("active_zone_entered_at") is None
+                    and event_zone_id is not None
+                ):
+                    record["active_zone_id"] = str(event_zone_id)
+                    record["active_zone_name"] = event_zone_name
+                    record["active_zone_entered_at"] = event_timestamp
+
+                record["last_event_time"] = event_timestamp
+
+            elif event_type == "customer_exit":
+                # Ignore duplicate exit events for an already closed
+                # session. This prevents double-finalization.
+                if record.get("session_closed"):
+                    continue
+
+                self._finalize_active_zone(
+                    record,
+                    event_timestamp,
+                )
+
+                record["store_exit_time"] = event_timestamp
+                record["last_seen"] = event_timestamp
+                record["current_zone"] = ""
+                record["zone_id"] = ""
+                record["current_dwell_seconds"] = 0.0
+                record["total_dwell_seconds"] = sum(
+                    self._session_zone_dwell_totals(
+                        record
+                    ).values()
+                )
+                record["session_closed"] = True
+                record["last_event_time"] = event_timestamp
+
+        # -------------------------------------------------
+        # 2. Process currently visible people.
+        #
+        # A closed session is deliberately ignored here. This is
+        # critical for B-4.9: a stale/late visible frame must not
+        # reopen a session after CUSTOMER_EXIT.
+        # -------------------------------------------------
+        for person in getattr(
+            intelligence_result,
+            "persons",
+            (),
+        ) or ():
             track_id = getattr(
                 person,
                 "track_id",
@@ -1944,15 +2380,15 @@ class RetailBrainOSApp:
             if track_id is None:
                 continue
 
+            track_id = int(track_id)
+            record = get_record(track_id)
+
+            if record.get("session_closed"):
+                continue
+
             first_seen = getattr(
                 person,
                 "first_seen_at",
-                None,
-            )
-
-            total_dwell = getattr(
-                person,
-                "total_dwell",
                 None,
             )
 
@@ -1968,22 +2404,155 @@ class RetailBrainOSApp:
                 None,
             )
 
-            self.session_people[int(track_id)] = {
-                "track_id": int(track_id),
-                "first_seen": first_seen,
-                "last_seen": intelligence_result.timestamp,
-                "zone_id": str(zone_id) if zone_id else "",
-                "current_dwell_seconds": (
-                    current_dwell.total_seconds()
-                    if current_dwell is not None
-                    else 0.0
-                ),
-                "total_dwell_seconds": (
-                    total_dwell.total_seconds()
-                    if total_dwell is not None
-                    else 0.0
-                ),
-            }
+            if (
+                record.get("first_seen") is None
+                and first_seen is not None
+            ):
+                record["first_seen"] = first_seen
+
+            record["last_seen"] = timestamp
+
+            zone_name = self._session_zone_name(
+                zone_id,
+                zones,
+            )
+
+            active_zone_id = record.get(
+                "active_zone_id"
+            )
+
+            if zone_id is not None:
+                zone_id_string = str(zone_id)
+
+                # Zone A -> Zone B (or any zone change) finalizes
+                # the previous visit at the actual transition time.
+                if (
+                    active_zone_id not in (None, "")
+                    and str(active_zone_id) != zone_id_string
+                ):
+                    self._finalize_active_zone(
+                        record,
+                        timestamp,
+                    )
+
+                if record.get("active_zone_entered_at") is None:
+                    record["active_zone_id"] = zone_id_string
+                    record["active_zone_name"] = zone_name
+
+                    # IMPORTANT:
+                    # A newly entered zone starts NOW. Do not reuse
+                    # store_entry_time here, otherwise a later visit
+                    # such as Zone A -> Zone B starts at the original
+                    # store-entry timestamp and creates overlapping
+                    # zone visits.
+                    record["active_zone_entered_at"] = timestamp
+
+                record["zone_id"] = zone_id_string
+                record["current_zone"] = zone_name
+
+                entered_at = record.get(
+                    "active_zone_entered_at"
+                )
+
+                if entered_at is not None:
+                    try:
+                        record["current_dwell_seconds"] = max(
+                            0.0,
+                            (
+                                timestamp - entered_at
+                            ).total_seconds(),
+                        )
+                    except (
+                        AttributeError,
+                        TypeError,
+                        ValueError,
+                    ):
+                        record["current_dwell_seconds"] = (
+                            current_dwell.total_seconds()
+                            if current_dwell is not None
+                            else 0.0
+                        )
+
+            else:
+                # Zone -> outside transition.
+                if active_zone_id not in (None, ""):
+                    self._finalize_active_zone(
+                        record,
+                        timestamp,
+                    )
+
+                record["zone_id"] = ""
+                record["current_zone"] = ""
+                record["current_dwell_seconds"] = 0.0
+
+            record["total_dwell_seconds"] = (
+                sum(
+                    self._session_zone_dwell_totals(
+                        record
+                    ).values()
+                )
+                + self._safe_float(
+                    record.get(
+                        "current_dwell_seconds",
+                        0.0,
+                    )
+                )
+            )
+
+        # -------------------------------------------------
+        # 3. Keep active-zone dwell live without double-counting.
+        # -------------------------------------------------
+        for record in self.session_people.values():
+
+            if record.get("session_closed"):
+                record["current_dwell_seconds"] = 0.0
+                record["total_dwell_seconds"] = sum(
+                    self._session_zone_dwell_totals(
+                        record
+                    ).values()
+                )
+                continue
+
+            active_zone_name = record.get(
+                "active_zone_name"
+            )
+
+            entered_at = record.get(
+                "active_zone_entered_at"
+            )
+
+            if (
+                active_zone_name
+                and entered_at is not None
+                and timestamp is not None
+            ):
+                try:
+                    record["current_dwell_seconds"] = max(
+                        0.0,
+                        (
+                            timestamp - entered_at
+                        ).total_seconds(),
+                    )
+                except (
+                    AttributeError,
+                    TypeError,
+                    ValueError,
+                ):
+                    pass
+
+            record["total_dwell_seconds"] = (
+                sum(
+                    self._session_zone_dwell_totals(
+                        record
+                    ).values()
+                )
+                + self._safe_float(
+                    record.get(
+                        "current_dwell_seconds",
+                        0.0,
+                    )
+                )
+            )
 
     # =====================================================
     # Face Capture
@@ -2151,25 +2720,27 @@ class RetailBrainOSApp:
         )
 
         # -------------------------------------------------
-        # 1. Save the complete session data.
+        # 1. Save the complete session data as CSV.
         # -------------------------------------------------
-
         output_path = (
             self.data_exports_dir
             / f"retail_session_{timestamp}.csv"
         )
 
-        selected_track_id = (
-            self._selected_track_id()
-        )
+        selected_track_id = self._selected_track_id()
 
         fieldnames = [
             "track_id",
             "first_seen",
+            "store_entry_time",
+            "store_exit_time",
             "last_seen",
             "zone_id",
+            "current_zone",
             "current_dwell_seconds",
             "total_dwell_seconds",
+            "zone_dwell_seconds",
+            "zone_visits",
         ]
 
         with output_path.open(
@@ -2185,130 +2756,179 @@ class RetailBrainOSApp:
 
             writer.writeheader()
 
-            for track_id in sorted(
-                self.session_people
-            ):
+            for track_id in sorted(self.session_people):
+                record = self.session_people[track_id]
 
-                record = self.session_people[
-                    track_id
-                ]
+                row = {
+                    key: record.get(key, "")
+                    for key in fieldnames
+                }
 
-                writer.writerow(
-                    {
-                        key: record.get(key, "")
-                        for key in fieldnames
-                    }
+                for key in (
+                    "first_seen",
+                    "store_entry_time",
+                    "store_exit_time",
+                    "last_seen",
+                ):
+                    row[key] = (
+                        self._session_timestamp(
+                            record.get(key)
+                        )
+                        or ""
+                    )
+
+                row["zone_dwell_seconds"] = json.dumps(
+                    record.get(
+                        "zone_dwell_seconds",
+                        {},
+                    ),
+                    ensure_ascii=False,
                 )
 
-        # -------------------------------------------------
-        # 2. If an Active Person is selected, also save
-        #    that person's complete dashboard details as a
-        #    separate JSON snapshot.
-        #
-        #    No new button is introduced. SAVE DATA performs
-        #    both operations.
-        # -------------------------------------------------
+                row["zone_visits"] = json.dumps(
+                    record.get(
+                        "zone_visits",
+                        [],
+                    ),
+                    ensure_ascii=False,
+                )
 
+                writer.writerow(row)
+
+        # -------------------------------------------------
+        # 2. If an Active Person is selected, save a clean
+        #    JSON snapshot of that person's complete journey.
+        # -------------------------------------------------
         selected_record = None
 
         if selected_track_id is not None:
-
             selected_record = self.session_people.get(
                 selected_track_id
             )
 
         if selected_record is not None:
-
             self.person_data_dir.mkdir(
                 parents=True,
                 exist_ok=True,
             )
 
-            person_data = dict(
+            # Include the active zone's current dwell in the
+            # snapshot so SAVE DATA reflects the exact moment
+            # at which the user pressed the button.
+            zone_totals = self._session_zone_dwell_totals(
                 selected_record
             )
 
-            person_data["selected"] = True
-
-            # Convert datetime/timedelta-like values to
-            # JSON-safe strings/numbers.
-            first_seen = person_data.get(
-                "first_seen"
+            active_zone_name = selected_record.get(
+                "active_zone_name"
             )
 
-            last_seen = person_data.get(
-                "last_seen"
+            active_seconds = self._safe_float(
+                selected_record.get(
+                    "current_dwell_seconds",
+                    0.0,
+                )
             )
 
-            if isinstance(
-                first_seen,
-                datetime,
-            ):
-                person_data["first_seen"] = (
-                    first_seen.isoformat()
+            if selected_record.get("session_closed"):
+                active_seconds = 0.0
+                active_zone_name = None
+
+            if active_zone_name:
+                zone_totals[active_zone_name] = (
+                    zone_totals.get(
+                        active_zone_name,
+                        0.0,
+                    )
+                    + active_seconds
                 )
 
-            if isinstance(
-                last_seen,
-                datetime,
+            # Include the current active visit in the snapshot
+            # without mutating the session history.
+            zone_visits = list(
+                selected_record.get(
+                    "zone_visits",
+                    [],
+                )
+            )
+
+            if (
+                active_zone_name
+                and selected_record.get(
+                    "active_zone_entered_at"
+                ) is not None
             ):
-                person_data["last_seen"] = (
-                    last_seen.isoformat()
+                zone_visits.append(
+                    {
+                        "zone_name": active_zone_name,
+                        "entered_at": self._session_timestamp(
+                            selected_record.get(
+                                "active_zone_entered_at"
+                            )
+                        ),
+                        "exited_at": None,
+                        "dwell_seconds": active_seconds,
+                    }
                 )
 
-            # Add the human-readable zone name when the
-            # current dashboard has zone information.
-            zone_name = ""
-
-            try:
-
-                current_people = getattr(
-                    self.live_dashboard,
-                    "current_people",
-                    {},
-                )
-
-                selected_person = None
-
-                for key, person in (
-                    current_people.items()
-                ):
-
-                    if int(key[1]) == selected_track_id:
-                        selected_person = person
-                        break
-
-                if selected_person is not None:
-
-                    zone_id = getattr(
-                        selected_person,
-                        "zone_id",
-                        None,
+            person_data = {
+                "track_id": selected_record.get(
+                    "track_id"
+                ),
+                "first_seen": self._session_timestamp(
+                    selected_record.get(
+                        "first_seen"
                     )
-
-                    zones = getattr(
-                        self.live_dashboard,
-                        "_last_zones",
-                        (),
+                ),
+                "store_entry_time": self._session_timestamp(
+                    selected_record.get(
+                        "store_entry_time"
                     )
-
-                    zone_name = (
-                        self.live_dashboard._get_zone_name(
-                            zone_id,
-                            zones,
-                        )
-                        if zone_id is not None
-                        else ""
+                ),
+                "store_exit_time": self._session_timestamp(
+                    selected_record.get(
+                        "store_exit_time"
                     )
+                ),
+                "last_seen": self._session_timestamp(
+                    selected_record.get(
+                        "last_seen"
+                    )
+                ),
+                "status": (
+                    "Exited"
+                    if selected_record.get(
+                        "store_exit_time"
+                    ) is not None
+                    else "Inside Store"
+                ),
+                "session_closed": bool(
+                    selected_record.get(
+                        "session_closed",
+                        False,
+                    )
+                ),
+                "current_zone": (
+                    ""
+                    if selected_record.get("session_closed")
+                    else selected_record.get(
+                        "current_zone",
+                        "",
+                    )
+                ),
+                "current_dwell_seconds": active_seconds,
+                "total_dwell_seconds": sum(
+                    zone_totals.values()
+                ),
+                "zone_dwell_seconds": zone_totals,
+                "zone_visits": zone_visits,
+                "selected": True,
+            }
 
-            except (
-                AttributeError,
-                TypeError,
-                ValueError,
-            ):
-                zone_name = ""
-
-            person_data["zone_name"] = zone_name
+            # Compatibility alias for older saved-data viewers.
+            person_data["zone_name"] = person_data[
+                "current_zone"
+            ]
 
             person_output_path = (
                 self.person_data_dir
@@ -2339,7 +2959,6 @@ class RetailBrainOSApp:
             )
 
         else:
-
             self.status_label.config(
                 text=(
                     f"Session data saved: "
@@ -2347,7 +2966,7 @@ class RetailBrainOSApp:
                 )
             )
 
-    # =====================================================
+
     # Saved Files Browser
     # =====================================================
 
@@ -2971,6 +3590,14 @@ class RetailBrainOSApp:
         self.camera_label.config(
             image="",
             text="Camera stopped",
+        )
+
+        self.camera_resolution_label.config(
+            text="Resolution: --"
+        )
+
+        self.camera_time_label.config(
+            text="Time: --"
         )
 
         self.camera_photo = None
