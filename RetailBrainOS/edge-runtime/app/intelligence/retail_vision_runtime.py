@@ -40,9 +40,13 @@ from app.intelligence.intelligence_engine import (
     RetailIntelligenceEngine,
 )
 
+
 from app.intelligence.zones.zone import Zone
 from app.intelligence.zones.zone_engine import ZoneEngine
 
+from app.vision.face_capture_manager import (
+    FaceCaptureManager,
+)
 
 MODEL_PATH = "yolo11n.pt"
 
@@ -107,6 +111,7 @@ class RetailVisionRuntime:
 
         self._zone_engine = None
         self._intelligence = None
+        self._face_capture = None
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -221,6 +226,8 @@ class RetailVisionRuntime:
             )
         )
 
+        face_capture = FaceCaptureManager()
+
         self._capture = capture
 
         self._detector = detector
@@ -229,6 +236,7 @@ class RetailVisionRuntime:
 
         self._zone_engine = zone_engine
         self._intelligence = intelligence
+        self._face_capture = face_capture
 
         self._stop_event.clear()
 
@@ -314,6 +322,28 @@ class RetailVisionRuntime:
                         frame_result
                     )
                 )
+
+                for event in intelligence_result.events:
+
+                    if event.event_type.value == "CUSTOMER_ENTRY":
+
+                        self._face_capture.register_track(
+                            event.track_id
+                        )
+
+                    elif event.event_type.value == "CUSTOMER_EXIT":
+
+                        self._face_capture.remove_track(
+                            event.track_id
+                        )
+                    for person in frame_result.persons:
+
+                     self._face_capture.process(
+                        track_id=person.track_id,
+                         frame=image,
+                        bounding_box=person.bounding_box,
+                        timestamp=camera_frame.timestamp,
+                    )
 
                 current_time = (
                     time.perf_counter()
