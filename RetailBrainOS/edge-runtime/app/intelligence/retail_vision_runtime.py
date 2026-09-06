@@ -2,7 +2,7 @@
 Retail Brain OS
 Vision Runtime
 
-Owns the live camera + vision + intelligence pipeline.
+Owns the live camera + vision + intelligence Pipeline.
 
 This module does NOT create a GUI or OpenCV display window.
 It exposes the latest processed frame and intelligence result
