@@ -322,20 +322,7 @@ class RetailVisionRuntime:
                         frame_result
                     )
                 )
-
-                for event in intelligence_result.events:
-
-                    if event.event_type.value == "CUSTOMER_ENTRY":
-
-                        self._face_capture.register_track(
-                            event.track_id
-                        )
-
-                    elif event.event_type.value == "CUSTOMER_EXIT":
-
-                        self._face_capture.remove_track(
-                            event.track_id
-                        )
+                
                     for person in frame_result.persons:
 
                      self._face_capture.process(
