@@ -238,6 +238,8 @@ class RetailVisionRuntime:
         self._intelligence = intelligence
         self._face_capture = face_capture
 
+        self._face_seen_tracks: set[int] = set()
+
         self._stop_event.clear()
 
         with self._lock:
