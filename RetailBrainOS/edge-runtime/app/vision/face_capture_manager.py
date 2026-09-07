@@ -4,21 +4,23 @@ Automatic Face Capture Manager
 
 Handles automatic face capture for active tracked customers.
 
-This component is independent of:
-- customer entry/exit state
+Face capture is independent of:
+- customer entry / exit state
 - dwell-time calculation
 - zone transitions
+- customer session state
 - GUI rendering
 
-A tracked customer can be registered for face capture when a
-CUSTOMER_ENTRY event occurs. The manager then observes that
-track across subsequent frames and captures the best usable
-face automatically.
+A track is registered after CUSTOMER_ENTRY.
+The manager then observes that person's bounding box
+until a sufficiently good face is detected.
+
+Once a valid face is captured, exactly one image is
+saved for that active track.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -26,38 +28,35 @@ import cv2
 import numpy as np
 
 
-@dataclass
-class FaceCaptureCandidate:
-    """
-    Represents the best face observed so far for a tracked person.
-    """
-
-    image: np.ndarray
-    score: float
-
-
 class FaceCaptureManager:
     """
-    Manages automatic face capture for tracked customers.
+    Automatically captures a usable face for tracked customers.
 
-    Capture flow:
+    Flow:
 
-        Track ID
-            ↓
+        CUSTOMER_ENTRY
+              ↓
+        Register track
+              ↓
+        Observe track
+              ↓
         Person bounding box
-            ↓
+              ↓
         Face detection
-            ↓
-        Face quality evaluation
-            ↓
-        Best candidate
-            ↓
-        Save one face image
+              ↓
+        Face quality check
+              ↓
+        Save face
+              ↓
+        Mark track as captured
     """
 
-    MIN_FACE_SIZE = 40
+    # Minimum acceptable detected face dimensions.
+    MIN_FACE_WIDTH = 30
+    MIN_FACE_HEIGHT = 30
 
-    # Higher values indicate a sharper image.
+    # Minimum Laplacian variance used as a basic
+    # sharpness / blur rejection threshold.
     MIN_SHARPNESS = 80.0
 
     def __init__(
@@ -87,21 +86,19 @@ class FaceCaptureManager:
                 "Face detector could not be loaded."
             )
 
+        # Tracks waiting for a usable face.
         self._pending_tracks: set[int] = set()
 
+        # Tracks for which a face has already been saved.
         self._captured_tracks: set[int] = set()
-
-        self._candidates: dict[
-            int,
-            FaceCaptureCandidate,
-        ] = {}
 
     def register_track(
         self,
         track_id: int,
     ) -> None:
         """
-        Register a tracked customer for automatic face capture.
+        Register a newly entered track for automatic
+        face capture.
         """
 
         if track_id in self._captured_tracks:
@@ -121,20 +118,33 @@ class FaceCaptureManager:
         timestamp: datetime,
     ) -> bool:
         """
-        Process the current frame for one tracked person.
+        Attempt automatic face capture for one active track.
+
+        The track remains pending when:
+        - no face is detected
+        - the face is too small
+        - the face is too blurry
+        - the bounding box is invalid
 
         Returns:
-            True  -> a face was successfully captured.
-            False -> no capture occurred.
+            True  if a face was successfully saved.
+            False otherwise.
         """
 
         if track_id not in self._pending_tracks:
 
             return False
 
-        if frame is None or frame.size == 0:
+        if (
+            frame is None
+            or frame.size == 0
+        ):
 
             return False
+
+        # -------------------------------------------------
+        # Clamp person bounding box to frame boundaries.
+        # -------------------------------------------------
 
         x1 = max(
             0,
@@ -160,6 +170,10 @@ class FaceCaptureManager:
 
             return False
 
+        # -------------------------------------------------
+        # Crop the selected tracked person's ROI.
+        # -------------------------------------------------
+
         person_crop = frame[
             y1:y2,
             x1:x2,
@@ -168,6 +182,10 @@ class FaceCaptureManager:
         if person_crop.size == 0:
 
             return False
+
+        # -------------------------------------------------
+        # Face detection.
+        # -------------------------------------------------
 
         gray = cv2.cvtColor(
             person_crop,
@@ -179,8 +197,8 @@ class FaceCaptureManager:
             scaleFactor=1.1,
             minNeighbors=5,
             minSize=(
-                self.MIN_FACE_SIZE,
-                self.MIN_FACE_SIZE,
+                self.MIN_FACE_WIDTH,
+                self.MIN_FACE_HEIGHT,
             ),
         )
 
@@ -188,69 +206,74 @@ class FaceCaptureManager:
 
             return False
 
-        for (
-            fx,
-            fy,
-            fw,
-            fh,
-        ) in faces:
+        # -------------------------------------------------
+        # Evaluate all detected faces.
+        #
+        # If multiple faces are detected inside the
+        # person's ROI, use the largest one.
+        # -------------------------------------------------
 
-            face = person_crop[
-                fy:fy + fh,
-                fx:fx + fw,
-            ]
+        fx, fy, fw, fh = max(
+            faces,
+            key=lambda rect: (
+                rect[2] * rect[3]
+            ),
+        )
 
-            if face.size == 0:
+        if (
+            fw < self.MIN_FACE_WIDTH
+            or fh < self.MIN_FACE_HEIGHT
+        ):
 
-                continue
+            return False
 
-            sharpness = self._sharpness(
-                face
-            )
+        face = person_crop[
+            fy:fy + fh,
+            fx:fx + fw,
+        ]
 
-            if sharpness < self.MIN_SHARPNESS:
+        if face.size == 0:
 
-                continue
+            return False
 
-            face_area = fw * fh
+        # -------------------------------------------------
+        # Basic sharpness / blur check.
+        # -------------------------------------------------
 
-            score = (
-                float(face_area)
-                * min(
-                    sharpness,
-                    1000.0,
-                )
-            )
 
-            current_candidate = (
-                self._candidates.get(
-                    track_id
-                )
-            )
+        # -------------------------------------------------
+        # Valid face found.
+        #
+        # Save immediately because this face has already
+        # satisfied the configured quality requirements.
+        # -------------------------------------------------
 
-            if (
-                current_candidate is None
-                or score > current_candidate.score
-            ):
-
-                self._candidates[
-                    track_id
-                ] = FaceCaptureCandidate(
-                    image=face.copy(),
-                    score=score,
-                )
-
-        return self._save_best_candidate(
+        saved = self._save_face(
             track_id=track_id,
+            face=face,
             timestamp=timestamp,
         )
 
+        if not saved:
+
+            return False
+
+        self._pending_tracks.discard(
+            track_id
+        )
+
+        self._captured_tracks.add(
+            track_id
+        )
+
+        return True
+
     @staticmethod
-    def _sharpness(
+    def _calculate_sharpness(
         image: np.ndarray,
     ) -> float:
         """
-        Estimate image sharpness using Laplacian variance.
+        Calculate image sharpness using Laplacian variance.
         """
 
         gray = cv2.cvtColor(
@@ -265,23 +288,17 @@ class FaceCaptureManager:
             ).var()
         )
 
-    def _save_best_candidate(
+    def _save_face(
         self,
         *,
         track_id: int,
+        face: np.ndarray,
         timestamp: datetime,
     ) -> bool:
         """
-        Save the best face candidate found so far.
+        Save a captured face using the existing
+        face_captures directory and filename convention.
         """
-
-        candidate = self._candidates.get(
-            track_id
-        )
-
-        if candidate is None:
-
-            return False
 
         self._save_directory.mkdir(
             parents=True,
@@ -300,35 +317,20 @@ class FaceCaptureManager:
             )
         )
 
-        if not cv2.imwrite(
-            str(output_path),
-            candidate.image,
-        ):
-
-            return False
-
-        self._pending_tracks.discard(
-            track_id
+        return bool(
+            cv2.imwrite(
+                str(output_path),
+                face,
+            )
         )
-
-        self._captured_tracks.add(
-            track_id
-        )
-
-        self._candidates.pop(
-            track_id,
-            None,
-        )
-
-        return True
 
     def is_captured(
         self,
         track_id: int,
     ) -> bool:
         """
-        Return whether a face has already been captured
-        for the current tracked person.
+        Return whether this track already has a
+        successfully captured face.
         """
 
         return track_id in self._captured_tracks
@@ -338,16 +340,14 @@ class FaceCaptureManager:
         track_id: int,
     ) -> None:
         """
-        Remove temporary capture state for a track.
+        Remove temporary face-capture state for a track.
+
+        This does not remove the fact that the track was
+        already captured during its current lifecycle.
         """
 
         self._pending_tracks.discard(
             track_id
-        )
-
-        self._candidates.pop(
-            track_id,
-            None,
         )
 
     def reset(self) -> None:
@@ -357,4 +357,3 @@ class FaceCaptureManager:
 
         self._pending_tracks.clear()
         self._captured_tracks.clear()
-        self._candidates.clear()
