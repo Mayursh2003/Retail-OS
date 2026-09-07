@@ -2,7 +2,7 @@
 Retail Brain OS
 Vision Runtime
 
-Owns the live camera + vision + intelligence Pipeline.
+Owns the live camera + vision + intelligence pipeline.
 
 This module does NOT create a GUI or OpenCV display window.
 It exposes the latest processed frame and intelligence result
@@ -112,6 +112,8 @@ class RetailVisionRuntime:
         self._zone_engine = None
         self._intelligence = None
         self._face_capture = None
+
+        self._face_seen_tracks: set[int] = set()
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -238,8 +240,6 @@ class RetailVisionRuntime:
         self._intelligence = intelligence
         self._face_capture = face_capture
 
-        self._face_seen_tracks: set[int] = set()
-
         self._stop_event.clear()
 
         with self._lock:
@@ -324,8 +324,21 @@ class RetailVisionRuntime:
                         frame_result
                     )
                 )
+
+                for person in frame_result.persons:
+
+                    if person.track_id not in self._face_seen_tracks:
+
+                        self._face_capture.register_track(
+                            person.track_id
+                        )
+
+                        self._face_seen_tracks.add(
+                            person.track_id
+                        )
+
                 
-                    for person in frame_result.persons:
+                for person in frame_result.persons:
 
                      self._face_capture.process(
                         track_id=person.track_id,
