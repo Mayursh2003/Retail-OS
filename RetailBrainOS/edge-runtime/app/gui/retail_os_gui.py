@@ -34,6 +34,10 @@ from app.gui.live_dashboard import (
     LiveDashboard,
 )
 
+from app.gui.saved_customer_viewer import (
+    SavedCustomerViewer,
+)
+
 from app.gui.zone_management_panel import (
     ZoneManagementPanel,
 )
@@ -2967,12 +2971,17 @@ class RetailBrainOSApp:
             )
 
 
-    # Saved Files Browser
+    # Saved Customer Viewer
     # =====================================================
 
     def open_recordings(self) -> None:
+        """
+        Open the saved customer/session viewer.
 
-        self.recordings_dir.mkdir(
+        The viewer reads the existing person_data and face_captures
+        directories. No runtime or intelligence state is modified.
+        """
+        self.person_data_dir.mkdir(
             parents=True,
             exist_ok=True,
         )
@@ -2982,338 +2991,14 @@ class RetailBrainOSApp:
             exist_ok=True,
         )
 
-        self.data_exports_dir.mkdir(
-            parents=True,
-            exist_ok=True,
+        SavedCustomerViewer(
+            self.root,
+            person_data_dir=self.person_data_dir,
+            face_captures_dir=self.face_captures_dir,
         )
 
-        self.person_data_dir.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        window = tk.Toplevel(
-            self.root
-        )
-
-        window.title(
-            "Retail Brain OS - Saved Files"
-        )
-
-        window.geometry(
-            "820x500"
-        )
-
-        window.minsize(
-            680,
-            400,
-        )
-
-        window.configure(
-            bg="#eef1f4"
-        )
-
-        tk.Label(
-            window,
-            text="SAVED FILES",
-            font=(
-                "Segoe UI",
-                14,
-                "bold",
-            ),
-            fg="#18202a",
-            bg="#eef1f4",
-        ).pack(
-            anchor="w",
-            padx=20,
-            pady=(18, 2),
-        )
-
-        tk.Label(
-            window,
-            text=(
-                "Recordings, face captures, session data "
-                "and saved person details"
-            ),
-            font=(
-                "Segoe UI",
-                9,
-            ),
-            fg="#56616d",
-            bg="#eef1f4",
-        ).pack(
-            anchor="w",
-            padx=20,
-            pady=(0, 8),
-        )
-
-        list_frame = tk.Frame(
-            window,
-            bg="#ffffff",
-            bd=1,
-            relief="solid",
-        )
-
-        list_frame.pack(
-            fill="both",
-            expand=True,
-            padx=20,
-            pady=8,
-        )
-
-        scrollbar = tk.Scrollbar(
-            list_frame
-        )
-
-        scrollbar.pack(
-            side="right",
-            fill="y",
-        )
-
-        listbox = tk.Listbox(
-            list_frame,
-            font=("Segoe UI", 9),
-            yscrollcommand=scrollbar.set,
-            selectmode=tk.SINGLE,
-        )
-
-        listbox.pack(
-            side="left",
-            fill="both",
-            expand=True,
-        )
-
-        scrollbar.config(
-            command=listbox.yview
-        )
-
-        # -------------------------------------------------
-        # Collect all saved Retail Brain OS files.
-        #
-        # Existing categories remain unchanged, with
-        # session CSV exports and selected-person JSON
-        # snapshots added to the same browser.
-        # -------------------------------------------------
-
-        saved_files = []
-
-        for path in self.recordings_dir.glob(
-            "surveillance_*.mp4"
-        ):
-            saved_files.append(
-                (
-                    path,
-                    "SURVEILLANCE",
-                )
-            )
-
-        for path in self.face_captures_dir.glob(
-            "person_*.jpg"
-        ):
-            saved_files.append(
-                (
-                    path,
-                    "FACE CAPTURE",
-                )
-            )
-
-        for path in self.data_exports_dir.glob(
-            "retail_session_*.csv"
-        ):
-            saved_files.append(
-                (
-                    path,
-                    "SESSION DATA",
-                )
-            )
-
-        for path in self.person_data_dir.glob(
-            "person_*.json"
-        ):
-            saved_files.append(
-                (
-                    path,
-                    "PERSON DATA",
-                )
-            )
-
-        saved_files.sort(
-            key=lambda item: item[0].stat().st_mtime,
-            reverse=True,
-        )
-
-        for path, file_type in saved_files:
-
-            size_mb = (
-                path.stat().st_size
-                / (1024 * 1024)
-            )
-
-            modified = datetime.fromtimestamp(
-                path.stat().st_mtime
-            ).strftime(
-                "%d-%m-%Y %H:%M:%S"
-            )
-
-            listbox.insert(
-                tk.END,
-                (
-                    f"[{file_type}]   "
-                    f"{path.name}   |   "
-                    f"{size_mb:.2f} MB   |   "
-                    f"{modified}"
-                ),
-            )
-
-        if not saved_files:
-
-            listbox.insert(
-                tk.END,
-                "No saved recordings or face captures."
-            )
-
-        def selected_file():
-
-            selection = listbox.curselection()
-
-            if not selection:
-                return None
-
-            index = selection[0]
-
-            if index >= len(saved_files):
-                return None
-
-            return saved_files[index]
-
-        def open_selected():
-
-            selected = selected_file()
-
-            if selected is None:
-
-                self.status_label.config(
-                    text="Select a saved file first."
-                )
-
-                return
-
-            path, file_type = selected
-
-            try:
-
-                os.startfile(
-                    str(path)
-                )
-
-                self.status_label.config(
-                    text=(
-                        f"Opened {file_type.lower()}: "
-                        f"{path.name}"
-                    )
-                )
-
-            except OSError as exc:
-
-                self.status_label.config(
-                    text=(
-                        "Unable to open saved file: "
-                        f"{exc}"
-                    )
-                )
-
-        def delete_selected():
-
-            selected = selected_file()
-
-            if selected is None:
-
-                self.status_label.config(
-                    text="Select a saved file first."
-                )
-
-                return
-
-            path, file_type = selected
-
-            confirmed = messagebox.askyesno(
-                "Delete Saved File",
-                f"Delete {path.name}?",
-                parent=window,
-            )
-
-            if not confirmed:
-                return
-
-            try:
-
-                path.unlink()
-
-                window.destroy()
-
-                self.open_recordings()
-
-                self.status_label.config(
-                    text=(
-                        f"Deleted {file_type.lower()}: "
-                        f"{path.name}"
-                    )
-                )
-
-            except OSError as exc:
-
-                self.status_label.config(
-                    text=(
-                        "Unable to delete saved file: "
-                        f"{exc}"
-                    )
-                )
-
-        button_frame = tk.Frame(
-            window,
-            bg="#eef1f4",
-        )
-
-        button_frame.pack(
-            fill="x",
-            padx=20,
-            pady=(8, 18),
-        )
-
-        tk.Button(
-            button_frame,
-            text="OPEN SELECTED",
-            command=open_selected,
-            width=16,
-            height=2,
-            relief="flat",
-        ).pack(
-            side="left",
-            padx=4,
-        )
-
-        tk.Button(
-            button_frame,
-            text="DELETE",
-            command=delete_selected,
-            width=12,
-            height=2,
-            relief="flat",
-        ).pack(
-            side="left",
-            padx=4,
-        )
-
-        tk.Button(
-            button_frame,
-            text="CLOSE",
-            command=window.destroy,
-            width=12,
-            height=2,
-            relief="flat",
-        ).pack(
-            side="right",
-            padx=4,
+        self.status_label.config(
+            text="Opened saved customer sessions."
         )
 
     # =====================================================
