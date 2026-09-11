@@ -2707,6 +2707,15 @@ class RetailBrainOSApp:
     # =====================================================
 
     def save_session_data(self) -> None:
+        """
+        Persist the current Retail Brain OS customer sessions.
+
+        Every known track receives a JSON session snapshot so the
+        Saved Customer Viewer can reconstruct all customers, not
+        only the currently selected person.
+
+        The existing CSV export is retained unchanged in purpose.
+        """
 
         if not self.session_people:
             self.status_label.config(
@@ -2719,6 +2728,11 @@ class RetailBrainOSApp:
             exist_ok=True,
         )
 
+        self.person_data_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
         timestamp = datetime.now().strftime(
             "%Y%m%d_%H%M%S"
         )
@@ -2726,12 +2740,11 @@ class RetailBrainOSApp:
         # -------------------------------------------------
         # 1. Save the complete session data as CSV.
         # -------------------------------------------------
+
         output_path = (
             self.data_exports_dir
             / f"retail_session_{timestamp}.csv"
         )
-
-        selected_track_id = self._selected_track_id()
 
         fieldnames = [
             "track_id",
@@ -2800,41 +2813,40 @@ class RetailBrainOSApp:
                 writer.writerow(row)
 
         # -------------------------------------------------
-        # 2. If an Active Person is selected, save a clean
-        #    JSON snapshot of that person's complete journey.
+        # 2. Save EVERY customer/session as an individual
+        #    JSON snapshot.
+        #
+        # This is the important persistence change:
+        # previously only the selected person received a
+        # person_*.json file. Now every known track gets one.
         # -------------------------------------------------
-        selected_record = None
 
-        if selected_track_id is not None:
-            selected_record = self.session_people.get(
-                selected_track_id
-            )
+        selected_track_id = self._selected_track_id()
 
-        if selected_record is not None:
-            self.person_data_dir.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
+        saved_customer_count = 0
+
+        for track_id in sorted(self.session_people):
+
+            record = self.session_people[track_id]
 
             # Include the active zone's current dwell in the
-            # snapshot so SAVE DATA reflects the exact moment
-            # at which the user pressed the button.
+            # snapshot without mutating the live session state.
             zone_totals = self._session_zone_dwell_totals(
-                selected_record
+                record
             )
 
-            active_zone_name = selected_record.get(
+            active_zone_name = record.get(
                 "active_zone_name"
             )
 
             active_seconds = self._safe_float(
-                selected_record.get(
+                record.get(
                     "current_dwell_seconds",
                     0.0,
                 )
             )
 
-            if selected_record.get("session_closed"):
+            if record.get("session_closed"):
                 active_seconds = 0.0
                 active_zone_name = None
 
@@ -2847,10 +2859,10 @@ class RetailBrainOSApp:
                     + active_seconds
                 )
 
-            # Include the current active visit in the snapshot
-            # without mutating the session history.
+            # Include the current active visit in the saved
+            # snapshot without mutating the live session history.
             zone_visits = list(
-                selected_record.get(
+                record.get(
                     "zone_visits",
                     [],
                 )
@@ -2858,7 +2870,7 @@ class RetailBrainOSApp:
 
             if (
                 active_zone_name
-                and selected_record.get(
+                and record.get(
                     "active_zone_entered_at"
                 ) is not None
             ):
@@ -2866,7 +2878,7 @@ class RetailBrainOSApp:
                     {
                         "zone_name": active_zone_name,
                         "entered_at": self._session_timestamp(
-                            selected_record.get(
+                            record.get(
                                 "active_zone_entered_at"
                             )
                         ),
@@ -2876,46 +2888,46 @@ class RetailBrainOSApp:
                 )
 
             person_data = {
-                "track_id": selected_record.get(
+                "track_id": record.get(
                     "track_id"
                 ),
                 "first_seen": self._session_timestamp(
-                    selected_record.get(
+                    record.get(
                         "first_seen"
                     )
                 ),
                 "store_entry_time": self._session_timestamp(
-                    selected_record.get(
+                    record.get(
                         "store_entry_time"
                     )
                 ),
                 "store_exit_time": self._session_timestamp(
-                    selected_record.get(
+                    record.get(
                         "store_exit_time"
                     )
                 ),
                 "last_seen": self._session_timestamp(
-                    selected_record.get(
+                    record.get(
                         "last_seen"
                     )
                 ),
                 "status": (
                     "Exited"
-                    if selected_record.get(
+                    if record.get(
                         "store_exit_time"
                     ) is not None
                     else "Inside Store"
                 ),
                 "session_closed": bool(
-                    selected_record.get(
+                    record.get(
                         "session_closed",
                         False,
                     )
                 ),
                 "current_zone": (
                     ""
-                    if selected_record.get("session_closed")
-                    else selected_record.get(
+                    if record.get("session_closed")
+                    else record.get(
                         "current_zone",
                         "",
                     )
@@ -2926,7 +2938,9 @@ class RetailBrainOSApp:
                 ),
                 "zone_dwell_seconds": zone_totals,
                 "zone_visits": zone_visits,
-                "selected": True,
+                "selected": (
+                    track_id == selected_track_id
+                ),
             }
 
             # Compatibility alias for older saved-data viewers.
@@ -2937,7 +2951,7 @@ class RetailBrainOSApp:
             person_output_path = (
                 self.person_data_dir
                 / (
-                    f"person_{selected_track_id}_"
+                    f"person_{track_id}_"
                     f"{timestamp}.json"
                 )
             )
@@ -2955,21 +2969,15 @@ class RetailBrainOSApp:
                     default=str,
                 )
 
-            self.status_label.config(
-                text=(
-                    f"Session + ID {selected_track_id} "
-                    f"data saved."
-                )
-            )
+            saved_customer_count += 1
 
-        else:
-            self.status_label.config(
-                text=(
-                    f"Session data saved: "
-                    f"{output_path.name}"
-                )
+        self.status_label.config(
+            text=(
+                f"Saved {saved_customer_count} customer "
+                f"session{'s' if saved_customer_count != 1 else ''} "
+                f"+ session CSV."
             )
-
+        )
 
     # Saved Customer Viewer
     # =====================================================
