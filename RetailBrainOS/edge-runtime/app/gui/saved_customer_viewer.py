@@ -225,6 +225,7 @@ class SavedCustomerViewer:
             self._card(customer)
 
     def _card(self, customer: dict[str, Any]) -> None:
+        """Render one saved customer as a compact intelligence status card."""
         record = customer["record"]
         track_id = customer["track_id"]
 
@@ -237,52 +238,125 @@ class SavedCustomerViewer:
         )
         card.pack(fill="x", padx=10, pady=6)
 
-        face_box = tk.Frame(card, width=82, height=82, bg="#e2e8f0")
-        face_box.pack(side="left", padx=10, pady=10)
+        # Face
+        face_box = tk.Frame(
+            card,
+            width=82,
+            height=82,
+            bg="#e2e8f0",
+        )
+        face_box.pack(side="left", padx=(10, 8), pady=10)
         face_box.pack_propagate(False)
 
         image = self._image(customer["face"], (72, 72))
+
         if image:
-            tk.Label(face_box, image=image, bg="#e2e8f0").pack(expand=True)
+            tk.Label(
+                face_box,
+                image=image,
+                bg="#e2e8f0",
+            ).pack(expand=True)
             self._image_refs.append(image)
         else:
             tk.Label(
-                face_box, text="NO\nFACE",
+                face_box,
+                text="NO\nFACE",
                 font=("Segoe UI", 8, "bold"),
-                fg=self.MUTED, bg="#e2e8f0"
+                fg=self.MUTED,
+                bg="#e2e8f0",
             ).pack(expand=True)
 
+        # Customer identity and state
         info = tk.Frame(card, bg=self.ALT)
-        info.pack(side="left", fill="both", expand=True, padx=(2, 10), pady=9)
+        info.pack(
+            side="left",
+            fill="both",
+            expand=True,
+            padx=(2, 10),
+            pady=9,
+        )
 
-        row = tk.Frame(info, bg=self.ALT)
-        row.pack(fill="x")
+        header = tk.Frame(info, bg=self.ALT)
+        header.pack(fill="x")
+
+        identity = tk.Frame(header, bg=self.ALT)
+        identity.pack(side="left", fill="x", expand=True)
 
         tk.Label(
-            row, text=f"TRACK #{track_id}",
+            identity,
+            text=f"TRACK #{track_id}",
             font=("Segoe UI", 11, "bold"),
-            fg=self.TEXT, bg=self.ALT
-        ).pack(side="left")
+            fg=self.TEXT,
+            bg=self.ALT,
+        ).pack(anchor="w")
+
+        tk.Label(
+            identity,
+            text="CUSTOMER SESSION",
+            font=("Segoe UI", 7, "bold"),
+            fg=self.MUTED,
+            bg=self.ALT,
+        ).pack(anchor="w", pady=(1, 0))
 
         status = self._status(record)
+
         tk.Label(
-            row, text=f"● {status.upper()}",
+            header,
+            text=f"● {status.upper()}",
             font=("Segoe UI", 8, "bold"),
             fg=self.GREEN if status == "Inside Store" else self.MUTED,
-            bg=self.ALT
-        ).pack(side="right")
+            bg=self.ALT,
+        ).pack(side="right", anchor="n")
 
-        zone = record.get("current_zone") or record.get("zone_name") or "Outside"
+        # Compact session metrics
+        metrics = tk.Frame(info, bg=self.ALT)
+        metrics.pack(fill="x", pady=(8, 0))
 
-        self._label(info, f"Entry: {self._time(record.get('store_entry_time'))}")
-        self._label(info, f"Exit: {self._time(record.get('store_exit_time'))}")
-        self._label(
-            info,
-            f"Total Dwell: {self._duration(record.get('total_dwell_seconds', 0))}",
-            bold=True,
+        zone = (
+            record.get("current_zone")
+            or record.get("zone_name")
+            or "Outside"
         )
-        self._label(info, f"Last Zone: {zone}")
 
+        metric_values = (
+            ("ENTRY", self._time(record.get("store_entry_time"))),
+            ("EXIT", self._time(record.get("store_exit_time"))),
+            (
+                "DWELL",
+                self._duration(
+                    record.get("total_dwell_seconds", 0)
+                ),
+            ),
+            ("LAST ZONE", str(zone)),
+        )
+
+        for index, (title, value) in enumerate(metric_values):
+            metric = tk.Frame(metrics, bg="#e9edf2")
+            metric.grid(
+                row=0,
+                column=index,
+                sticky="ew",
+                padx=2,
+            )
+            metrics.grid_columnconfigure(index, weight=1)
+
+            tk.Label(
+                metric,
+                text=title,
+                font=("Segoe UI", 6, "bold"),
+                fg=self.MUTED,
+                bg="#e9edf2",
+            ).pack(anchor="w", padx=6, pady=(4, 0))
+
+            tk.Label(
+                metric,
+                text=value,
+                font=("Segoe UI", 7, "bold"),
+                fg=self.TEXT,
+                bg="#e9edf2",
+            ).pack(anchor="w", padx=6, pady=(0, 4))
+
+        # Make the complete card clickable.
         for widget in self._walk(card):
             widget.bind(
                 "<Button-1>",
