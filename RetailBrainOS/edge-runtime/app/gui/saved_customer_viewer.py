@@ -397,6 +397,7 @@ class SavedCustomerViewer:
         ).pack(pady=90)
 
     def _show(self, customer: dict[str, Any]) -> None:
+        """Render the selected customer as a detailed status console."""
         for child in self.detail.winfo_children():
             child.destroy()
 
@@ -404,67 +405,209 @@ class SavedCustomerViewer:
         track_id = customer["track_id"]
         status = self._status(record)
 
-        tk.Label(
+        # -------------------------------------------------
+        # Customer identity / live session state
+        # -------------------------------------------------
+
+        header = tk.Frame(
             self.detail,
+            bg=self.WHITE,
+        )
+        header.pack(
+            fill="x",
+            padx=18,
+            pady=(16, 4),
+        )
+
+        identity = tk.Frame(
+            header,
+            bg=self.WHITE,
+        )
+        identity.pack(
+            side="left",
+            fill="x",
+            expand=True,
+        )
+
+        tk.Label(
+            identity,
             text=f"CUSTOMER #{track_id}",
             font=("Segoe UI", 15, "bold"),
-            fg=self.TEXT, bg=self.WHITE,
-        ).pack(anchor="w", padx=18, pady=(16, 2))
+            fg=self.TEXT,
+            bg=self.WHITE,
+        ).pack(anchor="w")
 
         tk.Label(
-            self.detail,
-            text=f"● {status}",
-            font=("Segoe UI", 9, "bold"),
-            fg=self.GREEN if status == "Inside Store" else self.MUTED,
+            identity,
+            text="SAVED SESSION PROFILE",
+            font=("Segoe UI", 7, "bold"),
+            fg=self.MUTED,
             bg=self.WHITE,
-        ).pack(anchor="w", padx=20, pady=(0, 10))
+        ).pack(
+            anchor="w",
+            pady=(2, 0),
+        )
+
+        status_fg = (
+            self.GREEN
+            if status == "Inside Store"
+            else self.MUTED
+        )
+
+        status_badge = tk.Frame(
+            header,
+            bg="#e9edf2",
+            bd=1,
+            relief="solid",
+        )
+        status_badge.pack(
+            side="right",
+            anchor="n",
+        )
+
+        tk.Label(
+            status_badge,
+            text=f"● {status.upper()}",
+            font=("Segoe UI", 8, "bold"),
+            fg=status_fg,
+            bg="#e9edf2",
+        ).pack(
+            padx=8,
+            pady=5,
+        )
+
+        # -------------------------------------------------
+        # Captured face
+        # -------------------------------------------------
 
         face_box = tk.Frame(
-            self.detail, width=190, height=190,
-            bg="#e2e8f0", bd=1, relief="solid"
+            self.detail,
+            width=190,
+            height=190,
+            bg="#e2e8f0",
+            bd=1,
+            relief="solid",
         )
-        face_box.pack(pady=(2, 12))
+        face_box.pack(pady=(8, 12))
         face_box.pack_propagate(False)
 
-        self._detail_image = self._image(customer["face"], (175, 175))
+        self._detail_image = self._image(
+            customer["face"],
+            (175, 175),
+        )
+
         if self._detail_image:
             tk.Label(
-                face_box, image=self._detail_image, bg="#e2e8f0"
+                face_box,
+                image=self._detail_image,
+                bg="#e2e8f0",
             ).pack(expand=True)
         else:
             tk.Label(
-                face_box, text="NO CAPTURED FACE",
+                face_box,
+                text="NO CAPTURED FACE",
                 font=("Segoe UI", 9, "bold"),
-                fg=self.MUTED, bg="#e2e8f0"
+                fg=self.MUTED,
+                bg="#e2e8f0",
             ).pack(expand=True)
 
-        details = tk.Frame(self.detail, bg=self.WHITE)
-        details.pack(fill="x", padx=20)
+        # -------------------------------------------------
+        # Session metrics
+        # -------------------------------------------------
+
+        section = tk.Frame(
+            self.detail,
+            bg=self.WHITE,
+        )
+        section.pack(
+            fill="x",
+            padx=18,
+        )
+
+        tk.Label(
+            section,
+            text="SESSION STATUS",
+            font=("Segoe UI", 8, "bold"),
+            fg=self.ACCENT,
+            bg=self.WHITE,
+        ).pack(
+            anchor="w",
+            pady=(0, 5),
+        )
+
+        details = tk.Frame(
+            section,
+            bg=self.WHITE,
+        )
+        details.pack(fill="x")
 
         fields = (
             ("First Seen", self._time(record.get("first_seen"))),
             ("Store Entry", self._time(record.get("store_entry_time"))),
             ("Store Exit", self._time(record.get("store_exit_time"))),
-            ("Current Zone", record.get("current_zone") or record.get("zone_name") or "Outside"),
-            ("Current Dwell", self._duration(record.get("current_dwell_seconds", 0))),
-            ("Total Dwell", self._duration(record.get("total_dwell_seconds", 0))),
+            (
+                "Current Zone",
+                record.get("current_zone")
+                or record.get("zone_name")
+                or "Outside",
+            ),
+            (
+                "Current Dwell",
+                self._duration(
+                    record.get(
+                        "current_dwell_seconds",
+                        0,
+                    )
+                ),
+            ),
+            (
+                "Total Dwell",
+                self._duration(
+                    record.get(
+                        "total_dwell_seconds",
+                        0,
+                    )
+                ),
+            ),
         )
 
         for title, value in fields:
-            r = tk.Frame(details, bg=self.ALT)
-            r.pack(fill="x", pady=2)
-            tk.Label(
-                r, text=title, font=("Segoe UI", 8),
-                fg=self.MUTED, bg=self.ALT
-            ).pack(side="left", padx=8, pady=6)
-            tk.Label(
-                r, text=str(value), font=("Segoe UI", 8, "bold"),
-                fg=self.TEXT, bg=self.ALT
-            ).pack(side="right", padx=8, pady=6)
+            row = tk.Frame(
+                details,
+                bg=self.ALT,
+            )
+            row.pack(
+                fill="x",
+                pady=2,
+            )
 
+            tk.Label(
+                row,
+                text=title,
+                font=("Segoe UI", 8),
+                fg=self.MUTED,
+                bg=self.ALT,
+            ).pack(
+                side="left",
+                padx=8,
+                pady=6,
+            )
+
+            tk.Label(
+                row,
+                text=str(value),
+                font=("Segoe UI", 8, "bold"),
+                fg=self.TEXT,
+                bg=self.ALT,
+            ).pack(
+                side="right",
+                padx=8,
+                pady=6,
+            )
+
+        # Existing section renderers are reused unchanged.
         self._zone_activity(details, record)
         self._journey(details, record)
-
     def _zone_activity(self, parent: tk.Frame, record: dict[str, Any]) -> None:
         tk.Label(
             parent, text="ZONE ACTIVITY",
