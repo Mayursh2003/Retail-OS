@@ -1,0 +1,25 @@
+{
+    "track_id": 3,
+    "first_seen": "2026-09-12T14:04:07.114923+05:30",
+    "store_entry_time": "2026-09-12T14:04:07.114923+05:30",
+    "store_exit_time": null,
+    "last_seen": "2026-09-12T14:04:07.670782+05:30",
+    "status": "Inside Store",
+    "session_closed": false,
+    "current_zone": "Zone B",
+    "current_dwell_seconds": 0.555859,
+    "total_dwell_seconds": 0.555859,
+    "zone_dwell_seconds": {
+        "Zone B": 0.555859
+    },
+    "zone_visits": [
+        {
+            "zone_name": "Zone B",
+            "entered_at": "2026-09-12T14:04:07.114923+05:30",
+            "exited_at": null,
+            "dwell_seconds": 0.555859
+        }
+    ],
+    "selected": false,
+    "zone_name": "Zone B"
+}

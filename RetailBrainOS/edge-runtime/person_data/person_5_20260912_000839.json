@@ -1,0 +1,25 @@
+{
+    "track_id": 5,
+    "first_seen": "2026-09-12T00:08:35.037786+05:30",
+    "store_entry_time": "2026-09-12T00:08:35.037786+05:30",
+    "store_exit_time": "2026-09-12T00:08:37.193861+05:30",
+    "last_seen": "2026-09-12T00:08:37.193861+05:30",
+    "status": "Exited",
+    "session_closed": true,
+    "current_zone": "",
+    "current_dwell_seconds": 0.0,
+    "total_dwell_seconds": 2.156075,
+    "zone_dwell_seconds": {
+        "Zone 1": 2.156075
+    },
+    "zone_visits": [
+        {
+            "zone_name": "Zone 1",
+            "entered_at": "2026-09-12T00:08:35.037786+05:30",
+            "exited_at": "2026-09-12T00:08:37.193861+05:30",
+            "dwell_seconds": 2.156075
+        }
+    ],
+    "selected": false,
+    "zone_name": ""
+}

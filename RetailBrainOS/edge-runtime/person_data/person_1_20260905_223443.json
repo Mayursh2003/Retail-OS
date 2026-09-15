@@ -1,0 +1,16 @@
+{
+    "track_id": 1,
+    "first_seen": "2026-09-05T22:34:16.209616+05:30",
+    "store_entry_time": null,
+    "store_exit_time": null,
+    "last_seen": "2026-09-05T22:34:42.966204+05:30",
+    "status": "Inside Store",
+    "session_closed": false,
+    "current_zone": "",
+    "current_dwell_seconds": 0.0,
+    "total_dwell_seconds": 0,
+    "zone_dwell_seconds": {},
+    "zone_visits": [],
+    "selected": true,
+    "zone_name": ""
+}

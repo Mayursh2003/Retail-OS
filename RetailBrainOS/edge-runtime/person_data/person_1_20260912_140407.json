@@ -1,0 +1,38 @@
+{
+    "track_id": 1,
+    "first_seen": "2026-09-12T14:00:55.655800+05:30",
+    "store_entry_time": "2026-09-12T14:00:55.655800+05:30",
+    "store_exit_time": "2026-09-12T14:03:52.613208+05:30",
+    "last_seen": "2026-09-12T14:03:52.613208+05:30",
+    "status": "Exited",
+    "session_closed": true,
+    "current_zone": "",
+    "current_dwell_seconds": 0.0,
+    "total_dwell_seconds": 176.957408,
+    "zone_dwell_seconds": {
+        "Zone B": 147.67494,
+        "Zone A": 29.282468
+    },
+    "zone_visits": [
+        {
+            "zone_name": "Zone B",
+            "entered_at": "2026-09-12T14:00:55.655800+05:30",
+            "exited_at": "2026-09-12T14:01:28.499621+05:30",
+            "dwell_seconds": 32.843821
+        },
+        {
+            "zone_name": "Zone A",
+            "entered_at": "2026-09-12T14:01:28.499621+05:30",
+            "exited_at": "2026-09-12T14:01:57.782089+05:30",
+            "dwell_seconds": 29.282468
+        },
+        {
+            "zone_name": "Zone B",
+            "entered_at": "2026-09-12T14:01:57.782089+05:30",
+            "exited_at": "2026-09-12T14:03:52.613208+05:30",
+            "dwell_seconds": 114.831119
+        }
+    ],
+    "selected": false,
+    "zone_name": ""
+}
