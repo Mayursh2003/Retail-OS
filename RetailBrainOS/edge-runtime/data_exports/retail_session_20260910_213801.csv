@@ -1,0 +1,2 @@
+track_id,first_seen,store_entry_time,store_exit_time,last_seen,zone_id,current_zone,current_dwell_seconds,total_dwell_seconds,zone_dwell_seconds,zone_visits
+1,2026-09-10T21:37:45.985152+05:30,2026-09-10T21:37:52.137068+05:30,,2026-09-10T21:38:00.998486+05:30,3a4fc350-dc2f-42c6-b4df-99ff26e4863a,Zone 1,8.861418,8.861418,{},[]

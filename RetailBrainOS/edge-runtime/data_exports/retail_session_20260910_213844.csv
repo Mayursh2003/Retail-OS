@@ -1,0 +1,2 @@
+track_id,first_seen,store_entry_time,store_exit_time,last_seen,zone_id,current_zone,current_dwell_seconds,total_dwell_seconds,zone_dwell_seconds,zone_visits
+1,2026-09-10T21:38:42.940336+05:30,2026-09-10T21:38:42.940336+05:30,2026-09-10T21:38:43.031103+05:30,2026-09-10T21:38:43.031103+05:30,,,0.0,0.090767,"{""Zone 1"": 0.090767}","[{""zone_name"": ""Zone 1"", ""entered_at"": ""2026-09-10T21:38:42.940336+05:30"", ""exited_at"": ""2026-09-10T21:38:43.031103+05:30"", ""dwell_seconds"": 0.090767}]"
